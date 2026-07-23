@@ -1,23 +1,21 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-23T10:43:58.677Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:05:15.547Z.
 
 ## Overview
 
-A clean, single-page Article Recommendation Agent UI that streams writer-ready SEO article recommendations from a workflow API, with live status chips, markdown rendering, and graceful error handling.
+Article Recommendation Agent with a redesigned UI: labeled form fields, loading and error states, recommendation cards with copy buttons, empty state, and a refine action.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 22
 
 ## Features
 
-- Keyword + Client form with inline client-side validation
-- Server-side /api/recommend proxy that keeps the API key out of the client bundle
-- Live SSE/chunked streaming with progressive markdown rendering
-- Heartbeat/status messages routed into a separate live status chip with elapsed time
-- Unicode escape decoding so raw \uXXXX sequences never reach the user
-- Non-streamed JSON fallback and on-brand error card with retry
-- Responsive, minimal SaaS aesthetic with reduced-motion support
+- Labeled input form with helper text and validation
+- Streaming recommendation results rendered as cards
+- Copy-to-clipboard per recommendation
+- Empty state and Generate more / Refine actions
+- Responsive two-column desktop layout
 
 ## Tech Stack
 
@@ -37,7 +35,7 @@ A clean, single-page Article Recommendation Agent UI that streams writer-ready S
 
 ## Database Models
 
-- `RecommendationRequest`
+- `RecommendationRun`
 
 ## File Inventory
 
@@ -108,43 +106,27 @@ A clean, single-page Article Recommendation Agent UI that streams writer-ready S
 
 ## Latest Change
 
-- **Updated at:** 2026-07-23T10:43:58.677Z
-- **Request:** Build a production-ready Next.js (App Router, TypeScript) application called "Article Recommendation Agent".
+- **Updated at:** 2026-07-23T16:05:15.547Z
+- **Request:** Redesign the UI of this Article Recommendation Agent page (input form + results output) with the following changes. Keep the existing tech stack and functionality intact — this is a visual/UX pass, not a logic rewrite.
 
-Layout constraints:
+INPUT FORM
+- Add proper <label> elements above each field (not just placeholder text): "Target Keyword" and "Client".
+- Add helper/example text under the Keyword field, e.g. "e.g. best running shoes for flat feet".
+- If the list of clients is fixed/known, convert the Client field into a dropdown/autocomplete instead of free text. If it's arbitrary, keep it as text but add a placeholder example.
+- Disable the "Get Recommendations" button until both fields have values; show a subtle error state if submitted empty.
+- On submit, show a loading state on the button (spinner + "Generating…") and disable it until the response returns.
+- Wrap the form in a centered container with max-width ~600-700px, generous padding, and clear vertical spacing between label/input/helper text.
+- Use a consistent type scale and an accent color for the primary button (currently looks like default unstyled HTML).
 
-No header/nav bar, no footer. Just a clean, centered, single-page interface with a max-width container.
-Modern, minimal SaaS aesthetic — not a generic AI-template look. Avoid the default "cream background + terracotta accent" or "black background + neon accent" clichés. Use a considered palette (e.g., off-white background, ink-navy text, an indigo/violet accent for primary actions), pair a distinctive display font for headings with a clean body font (e.g., Space Grotesk + Inter), and add one signature detail — like an animated gradient/progress line on the result card while streaming, and a live "elapsed time" status chip with a pulsing dot.
-Fully responsive, rounded corners, subtle card shadows, good spacing, visible keyboard focus states, respects reduced-motion.
+OUTPUT / RESULTS SECTION
+- Render each recommendation as a distinct card (border/shadow, rounded corners, padding) instead of plain text — each card should show: article title/angle, target keyword variant, and a short rationale.
+- Add a "Copy" button on each card that copies the title (or full recommendation) to clipboard.
+- Add an empty state shown before the first search — a short instructional message or example placeholder so the page doesn't look broken.
+- Add a "Generate more" / "Refine" action below the results so users can request additional recommendations without resubmitting the form from scratch.
+- If any structured metadata exists (search intent, difficulty, volume, etc.), display it as small tags/badges rather than inline prose.
 
-Form:
+LAYOUT
+- On desktop, use a layout where the form sits at the top (or left) and results appear below (or right) in a clean grid — avoid a single unstyled vertical stack.
+- Ensure the whole page has consistent spacing, font weights/sizes for headings vs. body text, and a subtle background/foreground contrast (avoid stark black-on-white default browser styling).
 
-Two required text inputs: Keyword and Client.
-A Get Recommendations submit button with disabled/loading state.
-Client-side validation with clear inline error states (not just browser default).
-
-API integration:
-
-Create a server-side route handler at /api/recommend that proxies to:
-Endpoint: https://test-agent.thearena.ai/api/workflows/22222756-700a-464c-b643-a8c11e92e64b/execute
-Method: POST
-Headers: { 'X-API-Key': 'sk-sim-amPAyUKDZNygmERaDmxwJBgkMabZvYXr', 'Content-Type': 'application/json' }
-Body: { "keyword": <keyword>, "client": <client>, "stream": true }
-The API key must be hardcoded server-side only — never exposed to the client bundle.
-The client form calls only the local /api/recommend route.
-
-Streaming handling:
-
-Read the external response as a stream (SSE/chunked) and progressively render tokens as they arrive, so text appears live.
-Also support a non-streamed JSON fallback gracefully.
-Bug to fix: raw literal unicode escape sequences (e.g. \u2013) must never be shown to the user as text — they should always be decoded into real characters (e.g. an en dash), whether they arrive inside valid JSON or as double-escaped plain text.
-Bug to fix: any heartbeat/progress/status messages from the stream (e.g. "This usually takes 1–2 minutes · 15s elapsed") must NOT be mixed into the rendered answer content. Detect and route these into a separate, subtle live status indicator/chip instead.
-
-Rendering:
-
-Render the final response as properly formatted Markdown (headings, bold, lists, links) using a markdown renderer, inside a well-styled result card.
-Show a polished loading skeleton/spinner during streaming.
-Show a clean, on-brand error card if the request fails, with a retry option.
-
-Other requirements:
-Clean, typed, production-quality code (proper component structure, error boundaries where relevant).
+Please implement these changes incrementally and preserve all existing data-fetching/submission logic — only touch markup, styling, and client-side UI state (loading, empty state, disabled state).
