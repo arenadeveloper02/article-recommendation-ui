@@ -30,3 +30,36 @@ export interface RecommendResult {
   keyword: string;
   client: string;
 }
+
+export interface ModelOutputBadge {
+  label: string;
+  value: string;
+}
+
+export interface SourceLink {
+  url: string;
+  label: string;
+}
+
+export interface QAItem {
+  id: string;
+  question: string;
+  answer: string;
+}
+
+export interface ModelOutputSection {
+  id: string;
+  title: string;
+  body: string;
+  raw: string;
+  badges: ModelOutputBadge[];
+  qaItems: QAItem[];
+}
+
+export interface ParsedModelOutput {
+  intro: string;
+  sections: ModelOutputSection[];
+  qaItems: QAItem[];
+  sources: SourceLink[];
+  hasContent: boolean;
+}

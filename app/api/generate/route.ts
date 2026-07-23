@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stripSentinelTokens } from '@/lib/modelOutput';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -141,9 +142,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
 
     // ORDER MATTERS: unwrap double-stringified strings first (JSON.parse natively
-    // decodes \uXXXX), then run the multi-pass decoder for any residual single- or
-    // double-escaped sequences so the client always receives clean markdown.
-    const brief = decodeEscapedText(unwrapJsonString(rawBrief));
+    // decodes \uXXXX), then run the multi-pass decoder, then strip completion
+    // sentinels ([DONE], [END], <|endoftext|>) anywhere in the text so the client
+    // always receives clean markdown.
+    const brief = stripSentinelTokens(decodeEscapedText(unwrapJsonString(rawBrief)));
 
     return NextResponse.json({ brief, raw: parsed });
   } catch (err) {

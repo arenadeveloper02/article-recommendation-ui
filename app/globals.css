@@ -42,6 +42,30 @@ body {
   animation: gradient-slide 1.4s linear infinite;
 }
 
+/* Internal scroll affordance for model-output panels: thin, visible scrollbar
+   so tall results scroll inside the card instead of extending the page. */
+.scroll-panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.35) transparent;
+}
+
+.scroll-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-panel::-webkit-scrollbar-thumb {
+  background-color: rgba(99, 102, 241, 0.35);
+  border-radius: 9999px;
+}
+
+.scroll-panel::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(99, 102, 241, 0.55);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in-up,
   .gradient-progress {

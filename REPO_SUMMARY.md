@@ -1,21 +1,22 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:42:31.949Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:55:31.520Z.
 
 ## Overview
 
-Article recommendation agent UI that turns a target keyword and client into writer-ready SEO article recommendations with streaming output, parsed recommendation cards, copy, and PDF export.
+Article recommendation agent UI that turns a target keyword and client into writer-ready article recommendations with defensive, structure-aware model output rendering.
 
 **Repository:** `article-recommendation-ui`  
-**File count:** 22
+**File count:** 24
 
 ## Features
 
-- Streaming recommendation generation via workflow API
-- Server-side decoding of escaped/double-stringified JSON payloads
-- Parsed recommendation cards with badges, copy, and PDF export
-- Markdown rendering with GFM support
-- Robust error and retry handling
+- Streamed article recommendations with live status updates
+- Shared defensive model-output renderer (Q&A lists, sections, truncated Sources list)
+- Sentinel/control token stripping ([DONE], [END], <|endoftext|>) anywhere in the text
+- Sanitized markdown rendering that escapes raw HTML from model output
+- Internal scroll panel with visible affordance for long results
+- Copy to clipboard and PDF export of recommendations
 
 ## Tech Stack
 
@@ -55,10 +56,12 @@ Article recommendation agent UI that turns a target keyword and client into writ
 ### Components
 
 - `components/BriefGeneratorClient.tsx`
+- `components/ModelOutputRenderer.tsx`
 - `components/RecommendationClient.tsx`
 
 ### Libraries
 
+- `lib/modelOutput.ts`
 - `lib/prisma.ts`
 - `lib/types.ts`
 - `prisma/schema.prisma`
@@ -92,7 +95,9 @@ Article recommendation agent UI that turns a target keyword and client into writ
 - `app/not-found.tsx`
 - `app/page.tsx`
 - `components/BriefGeneratorClient.tsx`
+- `components/ModelOutputRenderer.tsx`
 - `components/RecommendationClient.tsx`
+- `lib/modelOutput.ts`
 - `lib/prisma.ts`
 - `lib/types.ts`
 - `next-env.d.ts`
@@ -106,21 +111,20 @@ Article recommendation agent UI that turns a target keyword and client into writ
 
 ## Latest Change
 
-- **Updated at:** 2026-07-23T16:42:31.949Z
-- **Request:** The UI is displaying raw escaped JSON instead of decoded text. Example of what's currently shown on screen:
+- **Updated at:** 2026-07-23T16:55:31.520Z
+- **Request:** The recommendation output is breaking in a few ways when the model returns longer, more variable content (numbered Q&A lists, reference URL lists, etc.):
 
-d \u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d
+1. Streaming/completion artifacts are leaking into the rendered content — e.g. a stray "[DONE]" token appearing appended to the last item in a list. Find where the raw model/stream output is parsed and strip any control/completion markers (like [DONE], [END], or similar sentinel tokens) before it's rendered, regardless of where in the text they appear (end of a line, end of a URL, etc.) — not just at the very end of the full response.
 
-This means a JSON string is being rendered before it's fully parsed — \u201c/\u201d are escaped curly quotes and \u00b7 is a middot, meaning the actual intended text is something like: dental implants" · client "42 North Dental".
+2. The output renders as one long unstyled block (plain numbered list + raw hyperlinks) instead of adapting to actual content structure. Make the rendering dynamic based on what the response actually contains, not a fixed template:
+   - If the response includes a Q&A/FAQ-style list, render each item as a distinct list entry with the question as a heading and the answer as body text (support italic/emphasis if the model returns markdown).
+   - If the response includes reference URLs, render them as a distinct "Sources" section with a bulleted list, each link truncated/ellipsized visually if too long, with the full URL available on hover/title attribute — don't let long raw URLs force horizontal overflow or break the card width.
+   - Handle variable-length responses (2 items or 20 items) with consistent spacing — don't let the container's layout depend on a fixed expected item count.
 
-Please find where the API response for the recommendations is fetched and rendered, and fix the parsing so the decoded string is displayed, not the raw/escaped JSON. Specifically:
+3. Add overflow/scroll handling at the container level: if content is taller than the visible area, the results panel should scroll internally with a clear scroll affordance, instead of the page silently extending or clipping content.
 
-1. Check whether the response is being read with response.text() and inserted directly into the DOM — if so, switch to response.json() (or JSON.parse() on the text) before rendering.
-2. Check whether the backend is calling JSON.stringify() twice (i.e. stringifying an already-stringified payload) — if the parsed result is still a string containing escape sequences, add a second JSON.parse() to unwrap it, but ideally fix it at the source so double-stringification doesn't happen at all.
-3. Check any place where JSON.stringify(someString) is used to build display text (e.g. element.textContent = JSON.stringify(data.recommendation)) instead of using the plain string value directly — remove the unnecessary stringify.
-4. After the fix, confirm the rendered output shows real curly quotes (“ ”) and a real middot (·), not \u escape sequences, and that this works for all fields shown in the recommendation cards (title, rationale, keyword, client), not just the one currently broken.
+4. Add defensive parsing: if the model output is malformed, partially streamed, or missing an expected section (e.g. no reference URLs returned), render gracefully with a fallback ("No sources returned for this recommendation") instead of breaking layout or showing empty artifacts.
 
-Please show me the diff of what changed and briefly explain where the double-encoding was happening.
+5. Sanitize any markdown/HTML in the model response before rendering (escape raw HTML, safely parse markdown links/bold/italic) so malformed model output can't break the DOM structure.
 
-
-CRITICAL: DONT MAKE ANYCHANGES IN THE UI
+Please implement this as a shared "render model output" utility/component so any future output section (not just this one) benefits from the same dynamic, defensive rendering.

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { StreamEvent } from '@/lib/types';
+import { stripSentinelTokens } from '@/lib/modelOutput';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -11,15 +12,15 @@ const WORKFLOW_API_KEY = 'sk-sim-amPAyUKDZNygmERaDmxwJBgkMabZvYXr';
 const TEXT_KEYS = ['chunk', 'content', 'text', 'output', 'answer', 'result', 'message'];
 const SSE_FIELD_PATTERN = /^(?:data|event|id|retry):|^:/;
 
+/** Matches standalone completion sentinels sent as their own frame payload. */
+const SENTINEL_ONLY_PATTERN = /^\[?\s*(?:DONE|END|EOS|EOF|STOP|COMPLETE|FINISHED)\s*\]?$/i;
+
 /**
  * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
  * sequences (\u201c) and double-escaped sequences (\\u201c) produced when the
  * upstream workflow JSON.stringify()s an already-stringified payload (double
  * encoding). Runs up to two passes so nested encodings fully resolve to real
- * characters (curly quotes, middots, dashes) before any text reaches the
- * browser. This is the server-side root fix for output like
- * `\u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d`
- * appearing raw in the UI.
+ * characters before any text reaches the browser.
  */
 function decodeEscapedText(input: string): string {
   let current = input;
@@ -190,8 +191,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Non-streamed JSON fallback: extract the best content string and return plain JSON.
     // ORDER MATTERS: unwrapJsonString first (JSON.parse natively decodes \uXXXX in
-    // double-stringified payloads), THEN the multi-pass decoder as defense-in-depth
-    // for escapes that survive (e.g. double-escaped \\uXXXX inside a larger sentence).
+    // double-stringified payloads), THEN the multi-pass decoder, THEN sentinel
+    // stripping so completion markers ([DONE], [END], <|endoftext|>) never reach the UI.
     if (upstreamType.includes('application/json') || !upstream.body) {
       const rawText = await upstream.text();
       let parsed: unknown;
@@ -203,7 +204,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       const extracted =
         extractLongestContent(parsed) ??
         (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
-      return NextResponse.json({ content: decodeEscapedText(unwrapJsonString(extracted)) });
+      return NextResponse.json({
+        content: stripSentinelTokens(decodeEscapedText(unwrapJsonString(extracted))),
+      });
     }
 
     const reader = upstream.body.getReader();
@@ -225,7 +228,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const flushCarry = (): void => {
           if (!contentCarry) return;
-          const decoded = decodeEscapedText(contentCarry);
+          const decoded = stripSentinelTokens(decodeEscapedText(contentCarry));
           contentCarry = '';
           if (decoded) send({ type: 'content', text: decoded });
         };
@@ -234,7 +237,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           if (!text) return;
           const probe = decodeEscapedText(text);
           if (forceStatus || isStatusMessage(probe)) {
-            const statusText = probe.trim();
+            const statusText = stripSentinelTokens(probe).trim();
             if (statusText) send({ type: 'status', text: statusText });
             return;
           }
@@ -249,13 +252,16 @@ export async function POST(request: NextRequest): Promise<Response> {
             emitPart = combined.slice(0, tail.index);
           }
           if (!emitPart) return;
-          const decoded = decodeEscapedText(emitPart);
+          // Strip sentinel/control tokens ANYWHERE in the decoded chunk (end of a
+          // line, appended to a URL, etc.) \u2014 the client also strips on the full
+          // accumulated text as defense-in-depth for tokens split across chunks.
+          const decoded = stripSentinelTokens(decodeEscapedText(emitPart));
           if (decoded) send({ type: 'content', text: decoded });
         };
 
         const processData = (data: string): void => {
           const trimmed = data.trim();
-          if (!trimmed || trimmed === '[DONE]') return;
+          if (!trimmed || SENTINEL_ONLY_PATTERN.test(trimmed)) return;
           let parsed: unknown = null;
           let parsedOk = false;
           try {
@@ -266,7 +272,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           }
           if (parsedOk && typeof parsed === 'string') {
             // The frame payload was a JSON string; it may STILL be a JSON-encoded
-            // string if the upstream stringified twice — unwrap before emitting.
+            // string if the upstream stringified twice \u2014 unwrap before emitting.
             emitText(unwrapJsonString(parsed), false);
             return;
           }
@@ -315,24 +321,28 @@ export async function POST(request: NextRequest): Promise<Response> {
               processEventBlock(block);
               separatorIndex = buffer.indexOf('\n\n');
             }
-            // Progressive flush for raw (non-SSE) text streams without blank lines.
-            if (!sawSse && !buffer.includes('data:') && buffer.length > 512) {
-              emitText(buffer, false);
-              buffer = '';
-            }
           }
           buffer += decoder.decode();
           if (buffer.trim()) {
             processEventBlock(buffer);
+            buffer = '';
           }
           flushCarry();
           send({ type: 'done' });
         } catch (err) {
-          flushCarry();
-          const message = err instanceof Error ? err.message : 'The stream was interrupted.';
-          send({ type: 'error', text: message });
+          const message =
+            err instanceof Error ? err.message : 'Stream error while reading the recommendation service response.';
+          try {
+            send({ type: 'error', text: message });
+          } catch {
+            // Controller already closed \u2014 nothing else to send.
+          }
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Controller already closed.
+          }
         }
       },
     });
