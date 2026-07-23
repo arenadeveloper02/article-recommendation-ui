@@ -1,22 +1,23 @@
 # Repository Summary: Article Recommendation Agent
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-23T09:52:16.877Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-23T09:52:19.517Z.
 
 ## Overview
 
-A single-page Next.js App Router UI for generating writer-ready SEO content briefs from a target keyword via a server-side proxied workflow API.
+Single-page Next.js App Router UI that proxies a Sim workflow API to generate writer-ready SEO content briefs from a target keyword, rendered as beautiful Markdown.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 20
 
 ## Features
 
-- Keyword + optional client/brand input form
-- Server-side route handler proxying the SEO brief workflow API (secret key never exposed to the client)
-- Animated loading state with rotating status messages and elapsed-seconds counter
-- Beautiful Markdown brief rendering with react-markdown, remark-gfm, and Tailwind typography
-- Copy Markdown and Download .md toolbar actions
+- Centered card UI with keyword + optional client/brand inputs
+- Server-side proxy route handler with hardcoded API key (never exposed to client)
+- Defensive Markdown extraction from arbitrary workflow response shapes
+- Animated loading state with rotating status messages and elapsed timer
 - Error alert with retry
+- Rendered Markdown brief with react-markdown + remark-gfm + Tailwind typography
+- Copy Markdown and Download .md toolbar actions
 
 ## Tech Stack
 
@@ -103,7 +104,7 @@ A single-page Next.js App Router UI for generating writer-ready SEO content brie
 
 ## Latest Change
 
-- **Updated at:** 2026-07-23T09:52:16.877Z
+- **Updated at:** 2026-07-23T09:52:19.517Z
 - **Request:** Build a single-page Next.js App Router web app called "Article Recommendation Agent" that is a front-end UI for an existing SEO content-brief API.
 
 CRITICAL LAYOUT RULE: Do NOT render any site header (no top navbar/logo bar) and do NOT render any footer. The page should be just the centered content card on a full-height background. No header, no footer at all.
