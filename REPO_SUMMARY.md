@@ -1,10 +1,10 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:18:08.208Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:29:26.951Z.
 
 ## Overview
 
-SEO article recommendation agent UI that turns a target keyword and client into writer-ready article recommendations, streaming decoded markdown from the workflow API.
+Turn a target keyword and client into writer-ready article recommendations, with streaming results and a client-side PDF export of the recommendation cards.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 22
@@ -12,10 +12,11 @@ SEO article recommendation agent UI that turns a target keyword and client into 
 ## Features
 
 - Keyword + client input form with validation
-- Streaming SSE recommendations with live status updates
-- Double-stringified JSON unwrapping and \uXXXX escape decoding on server and client
-- Markdown rendering with recommendation cards, badges, and copy-to-clipboard
-- Brief generator with download as .md
+- Streaming recommendation generation via SSE
+- Parsed recommendation cards with intent/difficulty/volume badges
+- Copy-to-clipboard per recommendation
+- Download as PDF export (jsPDF, client-side) of all displayed recommendations
+- Markdown rendering with GFM support
 
 ## Tech Stack
 
@@ -35,7 +36,7 @@ SEO article recommendation agent UI that turns a target keyword and client into 
 
 ## Database Models
 
-- `RecommendationLog`
+- `RecommendationRun`
 
 ## File Inventory
 
@@ -106,18 +107,15 @@ SEO article recommendation agent UI that turns a target keyword and client into 
 
 ## Latest Change
 
-- **Updated at:** 2026-07-23T16:18:08.208Z
-- **Request:** The UI is displaying raw escaped JSON instead of decoded text. Example of what's currently shown on screen:
+- **Updated at:** 2026-07-23T16:29:26.951Z
+- **Request:** Add a "Download as PDF" option to the results section of this app.
 
-d \u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d
+Requirements:
+1. Add a "Download as PDF" button near the top of the results area (visible once recommendations are loaded — hide it in the empty state).
+2. Clicking it should generate a clean, readable PDF containing all currently displayed recommendation cards: for each one, include the title, intent tag, rationale, and the meta info (difficulty, search volume, word count).
+3. The PDF should be nicely formatted for a writer/client to read — not a raw screenshot of the UI. Use a simple layout: a header with the keyword/client the brief was generated for, then each recommendation as its own clearly separated block with a heading and body text. Strip out interactive-only elements (buttons, hover states) from the PDF output.
+4. Use a client-side library (e.g. jsPDF, or html2pdf.js if a closer visual match to the on-screen cards is preferred) so no backend/server changes are required — add via CDN script tag if not already installed.
+5. Name the downloaded file something like article-recommendations-[keyword]-[client].pdf (sanitize the keyword/client for filesystem-safe characters, lowercase, hyphens instead of spaces).
+6. Handle the case where the button is clicked with zero recommendations loaded (disable it, or no-op).
 
-This means a JSON string is being rendered before it's fully parsed — \u201c/\u201d are escaped curly quotes and \u00b7 is a middot, meaning the actual intended text is something like: dental implants" · client "42 North Dental".
-
-Please find where the API response for the recommendations is fetched and rendered, and fix the parsing so the decoded string is displayed, not the raw/escaped JSON. Specifically:
-
-1. Check whether the response is being read with response.text() and inserted directly into the DOM — if so, switch to response.json() (or JSON.parse() on the text) before rendering.
-2. Check whether the backend is calling JSON.stringify() twice (i.e. stringifying an already-stringified payload) — if the parsed result is still a string containing escape sequences, add a second JSON.parse() to unwrap it, but ideally fix it at the source so double-stringification doesn't happen at all.
-3. Check any place where JSON.stringify(someString) is used to build display text (e.g. element.textContent = JSON.stringify(data.recommendation)) instead of using the plain string value directly — remove the unnecessary stringify.
-4. After the fix, confirm the rendered output shows real curly quotes (“ ”) and a real middot (·), not \u escape sequences, and that this works for all fields shown in the recommendation cards (title, rationale, keyword, client), not just the one currently broken.
-
-Please show me the diff of what changed and briefly explain where the double-encoding was happening.
+Show me the code changes needed, including the CDN import and the generation function.
