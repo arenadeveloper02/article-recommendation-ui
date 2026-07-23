@@ -26,6 +26,28 @@ function decodeEscapedText(input: string): string {
     .replace(/\\"/g, '"');
 }
 
+/**
+ * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
+ * is STILL a quoted JSON string (the upstream stringified it twice), parse it
+ * again until we reach the plain text. This is the root fix for escaped output
+ * like `\u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d`
+ * appearing in the UI.
+ */
+function unwrapJsonString(text: string): string {
+  let current = text.trim();
+  for (let i = 0; i < 3; i += 1) {
+    if (current.length < 2 || !current.startsWith('"') || !current.endsWith('"')) break;
+    try {
+      const parsed = JSON.parse(current) as unknown;
+      if (typeof parsed !== 'string') break;
+      current = parsed.trim();
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
 /** Heuristic detection of heartbeat/progress messages that must not pollute the answer. */
 function isStatusMessage(text: string): boolean {
   const trimmed = text.trim();
@@ -156,6 +178,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     const upstreamType = upstream.headers.get('content-type') ?? '';
 
     // Non-streamed JSON fallback: extract the best content string and return plain JSON.
+    // unwrapJsonString handles the double-stringified case where the extracted value
+    // is itself a JSON-encoded string full of \uXXXX escapes.
     if (upstreamType.includes('application/json') || !upstream.body) {
       const rawText = await upstream.text();
       let parsed: unknown;
@@ -167,7 +191,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const extracted =
         extractLongestContent(parsed) ??
         (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
-      return NextResponse.json({ content: decodeEscapedText(extracted) });
+      return NextResponse.json({ content: decodeEscapedText(unwrapJsonString(extracted)) });
     }
 
     const reader = upstream.body.getReader();
@@ -206,13 +230,16 @@ export async function POST(request: NextRequest): Promise<Response> {
             parsedOk = false;
           }
           if (parsedOk && typeof parsed === 'string') {
-            emitText(parsed, false);
+            // The frame payload was a JSON string; it may STILL be a JSON-encoded
+            // string if the upstream stringified twice — unwrap before emitting.
+            emitText(unwrapJsonString(parsed), false);
             return;
           }
           if (parsedOk && parsed !== null && typeof parsed === 'object') {
             const text = pickStreamText(parsed, 0);
             if (text !== null) {
-              emitText(text, isStatusEvent(parsed));
+              // Same double-stringify guard for text fields nested inside objects.
+              emitText(unwrapJsonString(text), isStatusEvent(parsed));
             }
             return;
           }

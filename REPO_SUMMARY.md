@@ -1,21 +1,21 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:05:15.547Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-23T16:18:08.208Z.
 
 ## Overview
 
-Article Recommendation Agent with a redesigned UI: labeled form fields, loading and error states, recommendation cards with copy buttons, empty state, and a refine action.
+SEO article recommendation agent UI that turns a target keyword and client into writer-ready article recommendations, streaming decoded markdown from the workflow API.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 22
 
 ## Features
 
-- Labeled input form with helper text and validation
-- Streaming recommendation results rendered as cards
-- Copy-to-clipboard per recommendation
-- Empty state and Generate more / Refine actions
-- Responsive two-column desktop layout
+- Keyword + client input form with validation
+- Streaming SSE recommendations with live status updates
+- Double-stringified JSON unwrapping and \uXXXX escape decoding on server and client
+- Markdown rendering with recommendation cards, badges, and copy-to-clipboard
+- Brief generator with download as .md
 
 ## Tech Stack
 
@@ -35,7 +35,7 @@ Article Recommendation Agent with a redesigned UI: labeled form fields, loading 
 
 ## Database Models
 
-- `RecommendationRun`
+- `RecommendationLog`
 
 ## File Inventory
 
@@ -106,27 +106,18 @@ Article Recommendation Agent with a redesigned UI: labeled form fields, loading 
 
 ## Latest Change
 
-- **Updated at:** 2026-07-23T16:05:15.547Z
-- **Request:** Redesign the UI of this Article Recommendation Agent page (input form + results output) with the following changes. Keep the existing tech stack and functionality intact — this is a visual/UX pass, not a logic rewrite.
+- **Updated at:** 2026-07-23T16:18:08.208Z
+- **Request:** The UI is displaying raw escaped JSON instead of decoded text. Example of what's currently shown on screen:
 
-INPUT FORM
-- Add proper <label> elements above each field (not just placeholder text): "Target Keyword" and "Client".
-- Add helper/example text under the Keyword field, e.g. "e.g. best running shoes for flat feet".
-- If the list of clients is fixed/known, convert the Client field into a dropdown/autocomplete instead of free text. If it's arbitrary, keep it as text but add a placeholder example.
-- Disable the "Get Recommendations" button until both fields have values; show a subtle error state if submitted empty.
-- On submit, show a loading state on the button (spinner + "Generating…") and disable it until the response returns.
-- Wrap the form in a centered container with max-width ~600-700px, generous padding, and clear vertical spacing between label/input/helper text.
-- Use a consistent type scale and an accent color for the primary button (currently looks like default unstyled HTML).
+d \u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d
 
-OUTPUT / RESULTS SECTION
-- Render each recommendation as a distinct card (border/shadow, rounded corners, padding) instead of plain text — each card should show: article title/angle, target keyword variant, and a short rationale.
-- Add a "Copy" button on each card that copies the title (or full recommendation) to clipboard.
-- Add an empty state shown before the first search — a short instructional message or example placeholder so the page doesn't look broken.
-- Add a "Generate more" / "Refine" action below the results so users can request additional recommendations without resubmitting the form from scratch.
-- If any structured metadata exists (search intent, difficulty, volume, etc.), display it as small tags/badges rather than inline prose.
+This means a JSON string is being rendered before it's fully parsed — \u201c/\u201d are escaped curly quotes and \u00b7 is a middot, meaning the actual intended text is something like: dental implants" · client "42 North Dental".
 
-LAYOUT
-- On desktop, use a layout where the form sits at the top (or left) and results appear below (or right) in a clean grid — avoid a single unstyled vertical stack.
-- Ensure the whole page has consistent spacing, font weights/sizes for headings vs. body text, and a subtle background/foreground contrast (avoid stark black-on-white default browser styling).
+Please find where the API response for the recommendations is fetched and rendered, and fix the parsing so the decoded string is displayed, not the raw/escaped JSON. Specifically:
 
-Please implement these changes incrementally and preserve all existing data-fetching/submission logic — only touch markup, styling, and client-side UI state (loading, empty state, disabled state).
+1. Check whether the response is being read with response.text() and inserted directly into the DOM — if so, switch to response.json() (or JSON.parse() on the text) before rendering.
+2. Check whether the backend is calling JSON.stringify() twice (i.e. stringifying an already-stringified payload) — if the parsed result is still a string containing escape sequences, add a second JSON.parse() to unwrap it, but ideally fix it at the source so double-stringification doesn't happen at all.
+3. Check any place where JSON.stringify(someString) is used to build display text (e.g. element.textContent = JSON.stringify(data.recommendation)) instead of using the plain string value directly — remove the unnecessary stringify.
+4. After the fix, confirm the rendered output shows real curly quotes (“ ”) and a real middot (·), not \u escape sequences, and that this works for all fields shown in the recommendation cards (title, rationale, keyword, client), not just the one currently broken.
+
+Please show me the diff of what changed and briefly explain where the double-encoding was happening.

@@ -47,6 +47,38 @@ const BADGE_LABELS = [
   'word count',
 ];
 
+/**
+ * Client-side defense-in-depth: decodes literal \uXXXX escape sequences and
+ * escaped whitespace. Applied to the FULL accumulated stream text (not per
+ * chunk), so escape sequences that were split across two SSE frames (e.g.
+ * `\u20` + `1c`) are still decoded correctly before rendering.
+ */
+function decodeEscapedText(input: string): string {
+  if (!input.includes('\\')) return input;
+  return input
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"');
+}
+
+/** Unwraps a value that is still a JSON-encoded string (double stringification upstream). */
+function unwrapJsonString(text: string): string {
+  let current = text.trim();
+  for (let i = 0; i < 3; i += 1) {
+    if (current.length < 2 || !current.startsWith('"') || !current.endsWith('"')) break;
+    try {
+      const parsed = JSON.parse(current) as unknown;
+      if (typeof parsed !== 'string') break;
+      current = parsed.trim();
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
 function extractBadges(body: string): { badges: RecommendationBadge[]; cleaned: string } {
   const badges: RecommendationBadge[] = [];
   const kept: string[] = [];
@@ -182,6 +214,8 @@ export default function RecommendationClient() {
       const contentType = response.headers.get('content-type') ?? '';
 
       // Non-streamed JSON fallback (also covers server-side error responses).
+      // The body is parsed with response.json() (never rendered as raw text) and the
+      // content string is unwrapped + decoded in case it was double-stringified.
       if (contentType.includes('application/json')) {
         const data = (await response.json()) as { content?: string; error?: string };
         if (!response.ok || !data.content) {
@@ -189,7 +223,7 @@ export default function RecommendationClient() {
           setPhase('error');
           return;
         }
-        setContent(data.content);
+        setContent(decodeEscapedText(unwrapJsonString(data.content)));
         setPhase('done');
         return;
       }
@@ -209,9 +243,11 @@ export default function RecommendationClient() {
       const handleEvent = (event: StreamEvent): void => {
         if (event.type === 'content' && event.text) {
           accumulated += event.text;
-          setContent(accumulated);
+          // Decode over the FULL accumulated string so escape sequences split
+          // across stream chunks are still converted to real characters.
+          setContent(decodeEscapedText(accumulated));
         } else if (event.type === 'status' && event.text) {
-          setStatusMessage(event.text);
+          setStatusMessage(decodeEscapedText(event.text));
         } else if (event.type === 'error') {
           streamError = event.text ?? 'The stream reported an error.';
         }
@@ -255,6 +291,7 @@ export default function RecommendationClient() {
         setPhase('error');
         return;
       }
+      setContent(decodeEscapedText(accumulated));
       setPhase('done');
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
@@ -321,7 +358,6 @@ export default function RecommendationClient() {
       </header>
 
       <div className="mx-auto mt-10 grid max-w-2xl gap-8 lg:mx-0 lg:max-w-none lg:grid-cols-[400px_minmax(0,1fr)] lg:items-start">
-        {/* ── Input form ─────────────────────────────────────────── */}
         <form
           onSubmit={handleSubmit}
           noValidate
@@ -350,19 +386,19 @@ export default function RecommendationClient() {
                 className={inputClasses(Boolean(fieldErrors.keyword))}
               />
               {fieldErrors.keyword ? (
-                <p id="keyword-error" className="mt-1.5 text-xs font-medium text-red-600">
+                <p id="keyword-error" className="mt-1.5 text-xs text-red-600">
                   {fieldErrors.keyword}
                 </p>
               ) : (
                 <p id="keyword-help" className="mt-1.5 text-xs text-slate-400">
-                  e.g. best running shoes for flat feet
+                  The primary keyword you want to rank for.
                 </p>
               )}
             </div>
 
             <div>
               <label htmlFor="client" className="mb-1.5 block text-sm font-medium text-slate-700">
-                Client
+                Client / Brand
               </label>
               <input
                 id="client"
@@ -372,247 +408,134 @@ export default function RecommendationClient() {
                   setClient(e.target.value);
                   if (fieldErrors.client) setFieldErrors((prev) => ({ ...prev, client: undefined }));
                 }}
-                placeholder="e.g. 42 North Dental"
+                placeholder="42 North Dental"
                 disabled={isStreaming}
                 aria-invalid={Boolean(fieldErrors.client)}
                 aria-describedby={fieldErrors.client ? 'client-error' : 'client-help'}
                 className={inputClasses(Boolean(fieldErrors.client))}
               />
               {fieldErrors.client ? (
-                <p id="client-error" className="mt-1.5 text-xs font-medium text-red-600">
+                <p id="client-error" className="mt-1.5 text-xs text-red-600">
                   {fieldErrors.client}
                 </p>
               ) : (
                 <p id="client-help" className="mt-1.5 text-xs text-slate-400">
-                  The brand or client these articles will be written for.
+                  The client or brand the article is for.
                 </p>
               )}
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={isStreaming || !canSubmit}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-300/50 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300 disabled:shadow-none"
-          >
-            {isStreaming ? (
-              <>
-                <ButtonSpinner />
-                Generating\u2026
-              </>
-            ) : (
-              'Get Recommendations'
-            )}
-          </button>
-          {!canSubmit && !isStreaming && (
-            <p className="mt-2 text-center text-xs text-slate-400">
-              Fill in both fields to enable the button.
-            </p>
-          )}
+            <button
+              type="submit"
+              disabled={isStreaming || !canSubmit}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-300/50 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300 disabled:shadow-none"
+            >
+              {isStreaming ? (
+                <>
+                  <ButtonSpinner />
+                  Generating{'\u2026'}
+                </>
+              ) : (
+                'Get Recommendations'
+              )}
+            </button>
+          </div>
         </form>
 
-        {/* ── Results ────────────────────────────────────────────── */}
-        <section aria-label="Recommendation results" className="min-w-0">
+        <section aria-live="polite">
           {phase === 'idle' && (
-            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/80 bg-white/60 px-8 py-12 text-center animate-fade-in-up">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
-                <svg
-                  className="h-6 w-6"
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <path d="M10 2a6 6 0 00-3.815 10.631c.362.298.591.72.649 1.176l.093.74a1.5 1.5 0 001.489 1.313h3.168a1.5 1.5 0 001.489-1.313l.093-.74c.058-.457.287-.878.65-1.176A6 6 0 0010 2zM8.5 17.5a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3z" />
-                </svg>
-              </div>
-              <h2 className="mt-4 font-display text-lg font-semibold text-ink">No recommendations yet</h2>
-              <p className="mt-2 max-w-sm text-sm text-slate-500">
-                Enter a target keyword and client on the left, then press{' '}
-                <span className="font-medium text-slate-700">Get Recommendations</span>. Results stream in
-                live as the agent works.
-              </p>
-              <p className="mt-4 text-xs text-slate-400">
-                Example: keyword \u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d
-              </p>
+            <div className="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
+              <p className="text-sm font-medium text-slate-600">Recommendations will appear here.</p>
+              <p className="mt-1 text-xs text-slate-400">Enter a keyword and client, then start a run.</p>
             </div>
           )}
 
           {phase === 'error' && (
             <div className="rounded-2xl border border-red-200 bg-red-50 p-6 animate-fade-in-up">
-              <div className="flex items-start gap-3">
-                <svg
-                  className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <div className="flex-1">
-                  <h2 className="text-sm font-semibold text-red-800">Recommendation run failed</h2>
-                  <p className="mt-1 break-words text-sm text-red-700">{errorMessage}</p>
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    className="mt-3 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
-                  >
-                    Retry
-                  </button>
-                </div>
-              </div>
+              <h2 className="text-sm font-semibold text-red-800">Recommendation run failed</h2>
+              <p className="mt-1 break-words text-sm text-red-700">{errorMessage}</p>
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="mt-4 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
+              >
+                Retry
+              </button>
             </div>
           )}
 
           {showResults && (
-            <div className="animate-fade-in-up">
-              {isStreaming && <div className="gradient-progress h-1 rounded-full" aria-hidden="true" />}
-              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <h2 className="font-display text-lg font-semibold text-ink">Recommendations</h2>
-                {isStreaming ? (
-                  <span
-                    className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="relative flex h-2 w-2" aria-hidden="true">
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 motion-safe:animate-ping" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-600" />
-                    </span>
-                    <span className="max-w-[240px] truncate">{statusMessage || 'Working\u2026'}</span>
-                    <span className="tabular-nums text-indigo-500">{elapsed}s</span>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void handleCopy('all', content)}
-                    className="inline-flex items-center gap-1.5 self-start rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 sm:self-auto"
-                  >
-                    {copiedId === 'all' ? 'Copied!' : 'Copy all (Markdown)'}
-                  </button>
-                )}
-              </div>
+            <div className="space-y-5">
+              {isStreaming && (
+                <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm animate-fade-in-up">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-indigo-100">
+                    <div className="gradient-progress h-full w-full" />
+                  </div>
+                  <p className="mt-3 text-sm font-medium text-indigo-800">
+                    {statusMessage || 'Generating recommendations\u2026'}
+                  </p>
+                  <p className="mt-1 text-xs text-indigo-400">
+                    This usually takes 1{'\u2013'}2 minutes {'\u00b7'} {elapsed}s elapsed
+                  </p>
+                </div>
+              )}
 
               {parsed.intro && (
-                <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-indigo-100/50 sm:p-6">
-                  <article className={PROSE_CLASSES}>
+                <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm animate-fade-in-up">
+                  <div className={PROSE_CLASSES}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                       {parsed.intro}
                     </ReactMarkdown>
-                  </article>
+                  </div>
                 </div>
               )}
 
-              {parsed.cards.length > 0 && (
-                <div className="mt-4 grid gap-4">
-                  {parsed.cards.map((card) => (
-                    <article
-                      key={card.id}
-                      className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-indigo-100/50 transition hover:border-indigo-200 hover:shadow-md sm:p-6"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <h3 className="font-display text-base font-semibold leading-snug text-ink">
-                          {card.title}
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => void handleCopy(card.id, card.raw)}
-                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
-                          aria-label={`Copy recommendation: ${card.title}`}
-                        >
-                          {copiedId === card.id ? (
-                            <>
-                              <svg
-                                className="h-3.5 w-3.5 text-emerald-500"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 20 20"
-                                fill="currentColor"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  fillRule="evenodd"
-                                  d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                                  clipRule="evenodd"
-                                />
-                              </svg>
-                              Copied!
-                            </>
-                          ) : (
-                            'Copy'
-                          )}
-                        </button>
-                      </div>
-                      {card.badges.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {card.badges.map((badge) => (
-                            <span
-                              key={`${card.id}-${badge.label}`}
-                              className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700"
-                            >
-                              <span className="text-indigo-400">{badge.label}:</span>
-                              {badge.value}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {card.body && (
-                        <div className={`mt-3 ${PROSE_CLASSES}`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {card.body}
-                          </ReactMarkdown>
-                        </div>
-                      )}
-                    </article>
-                  ))}
-                </div>
-              )}
-
-              {isStreaming && !parsed.intro && parsed.cards.length === 0 && (
-                <div
-                  className="mt-4 space-y-3 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-indigo-100/50"
-                  role="status"
-                  aria-label="Loading recommendations"
+              {parsed.cards.map((card) => (
+                <article
+                  key={card.id}
+                  className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm animate-fade-in-up"
                 >
-                  <div className="h-5 w-2/5 rounded bg-slate-200 motion-safe:animate-pulse" />
-                  <div className="h-4 w-full rounded bg-slate-100 motion-safe:animate-pulse" />
-                  <div className="h-4 w-11/12 rounded bg-slate-100 motion-safe:animate-pulse" />
-                  <div className="h-4 w-4/5 rounded bg-slate-100 motion-safe:animate-pulse" />
-                  <div className="mt-5 h-5 w-1/3 rounded bg-slate-200 motion-safe:animate-pulse" />
-                  <div className="h-4 w-full rounded bg-slate-100 motion-safe:animate-pulse" />
-                  <div className="h-4 w-3/4 rounded bg-slate-100 motion-safe:animate-pulse" />
-                </div>
-              )}
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="font-display text-base font-semibold text-ink">{card.title}</h3>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopy(card.id, card.raw)}
+                      className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
+                    >
+                      {copiedId === card.id ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                  {card.badges.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {card.badges.map((badge) => (
+                        <span
+                          key={`${card.id}-${badge.label}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700"
+                        >
+                          <span className="text-indigo-400">{badge.label}:</span> {badge.value}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {card.body && (
+                    <div className={`mt-4 ${PROSE_CLASSES}`}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                        {card.body}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                </article>
+              ))}
 
               {phase === 'done' && (
-                <div className="mt-6 flex flex-wrap items-center gap-3">
+                <div className="flex justify-end">
                   <button
                     type="button"
                     onClick={handleGenerateMore}
-                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-1"
+                    className="rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
                   >
-                    <svg
-                      className="h-4 w-4"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    Generate more
+                    Generate again
                   </button>
-                  <p className="text-xs text-slate-400">
-                    Runs the agent again for \u201c{keyword.trim()}\u201d \u2014 tweak the form fields first to refine.
-                  </p>
                 </div>
               )}
             </div>

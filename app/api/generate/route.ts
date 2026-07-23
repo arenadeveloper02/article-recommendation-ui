@@ -7,6 +7,40 @@ const WORKFLOW_ENDPOINT =
   'https://test-agent.thearena.ai/api/workflows/22222756-700a-464c-b643-a8c11e92e64b/execute';
 const WORKFLOW_API_KEY = 'sk-sim-amPAyUKDZNygmERaDmxwJBgkMabZvYXr';
 
+/**
+ * Decodes raw literal unicode escape sequences (e.g. \u2013) and common escaped
+ * whitespace so they are never shown to the user as literal text.
+ */
+function decodeEscapedText(input: string): string {
+  if (!input.includes('\\')) return input;
+  return input
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\r/g, '\n')
+    .replace(/\\"/g, '"');
+}
+
+/**
+ * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
+ * is STILL a quoted JSON string, parse it again until we reach the plain text.
+ */
+function unwrapJsonString(text: string): string {
+  let current = text.trim();
+  for (let i = 0; i < 3; i += 1) {
+    if (current.length < 2 || !current.startsWith('"') || !current.endsWith('"')) break;
+    try {
+      const parsed = JSON.parse(current) as unknown;
+      if (typeof parsed !== 'string') break;
+      current = parsed.trim();
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
 function collectStrings(value: unknown, acc: string[], depth: number): void {
   if (depth > 12) return;
   if (typeof value === 'string') {
@@ -92,9 +126,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const extracted = extractBrief(parsed);
-    const brief =
+    const rawBrief =
       extracted ??
       (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
+
+    // Unwrap double-stringified strings and decode residual \uXXXX escapes so the
+    // client always receives clean, human-readable markdown.
+    const brief = decodeEscapedText(unwrapJsonString(rawBrief));
 
     return NextResponse.json({ brief, raw: parsed });
   } catch (err) {
