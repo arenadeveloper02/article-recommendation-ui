@@ -1,16 +1,16 @@
 # Article Recommendation Agent
 
-A single-page Next.js App Router UI that turns a target keyword (plus an optional client/brand) into a writer-ready SEO content brief by calling a Sim workflow API through a server-side proxy and rendering the returned Markdown.
+A clean, single-page tool that turns a target keyword and client into writer-ready article recommendations, streamed live from an AI workflow and rendered as formatted Markdown.
 
 ## Features
 
-- Centered single-card interface — no site header, no footer
-- Server-side API proxy (`app/api/generate/route.ts`) that keeps the workflow API key out of the browser bundle
-- Animated loading state with rotating status messages and an elapsed-seconds counter for the 1–2 minute workflow run
-- Defensive Markdown extraction that walks any workflow response shape and picks the longest brief-looking string
-- Beautiful Markdown rendering via `react-markdown` + `remark-gfm` with Tailwind typography (headings, lists, tables, links opening in new tabs)
-- Copy Markdown to clipboard (with 2s checkmark) and Download as `article-brief.md`
-- Error alert with one-click retry
+- Keyword + Client form with inline client-side validation
+- Server-side `/api/recommend` proxy — the workflow API key never reaches the browser
+- Live streaming rendering (SSE/chunked) with a non-streamed JSON fallback
+- Unicode escape sequences (e.g. `\u2013`) are decoded server-side, never shown raw
+- Heartbeat/progress messages are routed into a live status chip (pulsing dot + elapsed time), kept out of the answer
+- Animated gradient progress line while streaming, with `prefers-reduced-motion` support
+- Markdown result card, loading skeleton, and on-brand error card with retry
 
 ## Tech Stack
 
@@ -18,24 +18,14 @@ A single-page Next.js App Router UI that turns a target keyword (plus an optiona
 - TypeScript (strict)
 - Tailwind CSS v3 + @tailwindcss/typography
 - react-markdown + remark-gfm
+- Prisma + PostgreSQL (Neon on Vercel)
 
 ## Local Setup
 
-```bash
-npm install
-npm run dev
-```
+1. `npm install`
+2. Copy `.env.example` to `.env` and set `DATABASE_URL`
+3. `npm run dev` and open http://localhost:3000
 
-Open http://localhost:3000. No environment variables are required — the workflow endpoint and API key are configured server-side in `app/api/generate/route.ts`.
+## Deploy
 
-## Build
-
-```bash
-npm run build
-npm start
-```
-
-## Deploy Notes
-
-- The generate route sets `export const maxDuration = 300` so long-running workflow executions (60–120s) are supported on platforms that honor route-level max duration (e.g. Vercel).
-- This app is stateless — no database or persistence layer is used.
+Deploys on Vercel. The build script runs `prisma generate && prisma db push && next build`. `DATABASE_URL` is provided by the Neon integration.
