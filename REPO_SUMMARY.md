@@ -1,23 +1,22 @@
 # Repository Summary: Article Recommendation Agent
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-23T09:52:19.517Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-23T09:52:22.091Z.
 
 ## Overview
 
-Single-page Next.js App Router UI that proxies a Sim workflow API to generate writer-ready SEO content briefs from a target keyword, rendered as beautiful Markdown.
+A single-page Next.js App Router UI for generating writer-ready SEO content briefs from a target keyword via a server-side proxied workflow API.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 20
 
 ## Features
 
-- Centered card UI with keyword + optional client/brand inputs
-- Server-side proxy route handler with hardcoded API key (never exposed to client)
-- Defensive Markdown extraction from arbitrary workflow response shapes
+- Centered card UI with keyword and client/brand inputs
+- Server-side API proxy route that hides the workflow API key
+- Defensive Markdown brief extraction from arbitrary workflow responses
 - Animated loading state with rotating status messages and elapsed timer
-- Error alert with retry
-- Rendered Markdown brief with react-markdown + remark-gfm + Tailwind typography
-- Copy Markdown and Download .md toolbar actions
+- Error state with retry
+- Rendered Markdown brief with copy-to-clipboard and .md download
 
 ## Tech Stack
 
@@ -104,7 +103,7 @@ Single-page Next.js App Router UI that proxies a Sim workflow API to generate wr
 
 ## Latest Change
 
-- **Updated at:** 2026-07-23T09:52:19.517Z
+- **Updated at:** 2026-07-23T09:52:22.091Z
 - **Request:** Build a single-page Next.js App Router web app called "Article Recommendation Agent" that is a front-end UI for an existing SEO content-brief API.
 
 CRITICAL LAYOUT RULE: Do NOT render any site header (no top navbar/logo bar) and do NOT render any footer. The page should be just the centered content card on a full-height background. No header, no footer at all.
