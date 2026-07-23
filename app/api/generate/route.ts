@@ -8,23 +8,33 @@ const WORKFLOW_ENDPOINT =
 const WORKFLOW_API_KEY = 'sk-sim-amPAyUKDZNygmERaDmxwJBgkMabZvYXr';
 
 /**
- * Decodes raw literal unicode escape sequences (e.g. \u2013) and common escaped
- * whitespace so they are never shown to the user as literal text.
+ * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
+ * sequences (\u201c) and double-escaped sequences (\\u201c) produced when the
+ * upstream workflow JSON.stringify()s an already-stringified payload (double
+ * encoding). Runs up to two passes so nested encodings fully resolve to real
+ * characters before the brief is returned to the client.
  */
 function decodeEscapedText(input: string): string {
-  if (!input.includes('\\')) return input;
-  return input
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\r\\n/g, '\n')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\r/g, '\n')
-    .replace(/\\"/g, '"');
+  let current = input;
+  for (let pass = 0; pass < 2; pass += 1) {
+    if (!current.includes('\\')) break;
+    const next = current
+      .replace(/\\{1,2}u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\{1,2}r\\{1,2}n/g, '\n')
+      .replace(/\\{1,2}n/g, '\n')
+      .replace(/\\{1,2}t/g, '\t')
+      .replace(/\\{1,2}r/g, '\n')
+      .replace(/\\{1,2}"/g, '"');
+    if (next === current) break;
+    current = next;
+  }
+  return current;
 }
 
 /**
  * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
  * is STILL a quoted JSON string, parse it again until we reach the plain text.
+ * JSON.parse natively decodes \uXXXX escapes, so this is the preferred path.
  */
 function unwrapJsonString(text: string): string {
   let current = text.trim();
@@ -130,8 +140,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       extracted ??
       (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
 
-    // Unwrap double-stringified strings and decode residual \uXXXX escapes so the
-    // client always receives clean, human-readable markdown.
+    // ORDER MATTERS: unwrap double-stringified strings first (JSON.parse natively
+    // decodes \uXXXX), then run the multi-pass decoder for any residual single- or
+    // double-escaped sequences so the client always receives clean markdown.
     const brief = decodeEscapedText(unwrapJsonString(rawBrief));
 
     return NextResponse.json({ brief, raw: parsed });

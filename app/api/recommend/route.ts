@@ -12,26 +12,37 @@ const TEXT_KEYS = ['chunk', 'content', 'text', 'output', 'answer', 'result', 'me
 const SSE_FIELD_PATTERN = /^(?:data|event|id|retry):|^:/;
 
 /**
- * Decodes raw literal unicode escape sequences (e.g. \u2013) and common escaped
- * whitespace so they are never shown to the user as literal text.
+ * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
+ * sequences (\u201c) and double-escaped sequences (\\u201c) produced when the
+ * upstream workflow JSON.stringify()s an already-stringified payload (double
+ * encoding). Runs up to two passes so nested encodings fully resolve to real
+ * characters (curly quotes, middots, dashes) before any text reaches the
+ * browser. This is the server-side root fix for output like
+ * `\u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d`
+ * appearing raw in the UI.
  */
 function decodeEscapedText(input: string): string {
-  if (!input.includes('\\')) return input;
-  return input
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\r\\n/g, '\n')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\r/g, '\n')
-    .replace(/\\"/g, '"');
+  let current = input;
+  for (let pass = 0; pass < 2; pass += 1) {
+    if (!current.includes('\\')) break;
+    const next = current
+      .replace(/\\{1,2}u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\{1,2}r\\{1,2}n/g, '\n')
+      .replace(/\\{1,2}n/g, '\n')
+      .replace(/\\{1,2}t/g, '\t')
+      .replace(/\\{1,2}r/g, '\n')
+      .replace(/\\{1,2}"/g, '"');
+    if (next === current) break;
+    current = next;
+  }
+  return current;
 }
 
 /**
  * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
  * is STILL a quoted JSON string (the upstream stringified it twice), parse it
- * again until we reach the plain text. This is the root fix for escaped output
- * like `\u201cdental implants\u201d \u00b7 client \u201c42 North Dental\u201d`
- * appearing in the UI.
+ * again until we reach the plain text. JSON.parse here also natively decodes
+ * \uXXXX escapes, which is the preferred (lossless) decode path.
  */
 function unwrapJsonString(text: string): string {
   let current = text.trim();
@@ -178,8 +189,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     const upstreamType = upstream.headers.get('content-type') ?? '';
 
     // Non-streamed JSON fallback: extract the best content string and return plain JSON.
-    // unwrapJsonString handles the double-stringified case where the extracted value
-    // is itself a JSON-encoded string full of \uXXXX escapes.
+    // ORDER MATTERS: unwrapJsonString first (JSON.parse natively decodes \uXXXX in
+    // double-stringified payloads), THEN the multi-pass decoder as defense-in-depth
+    // for escapes that survive (e.g. double-escaped \\uXXXX inside a larger sentence).
     if (upstreamType.includes('application/json') || !upstream.body) {
       const rawText = await upstream.text();
       let parsed: unknown;
@@ -202,20 +214,43 @@ export async function POST(request: NextRequest): Promise<Response> {
       async start(controller) {
         let buffer = '';
         let sawSse = false;
+        // Holds a trailing PARTIAL escape sequence (e.g. a chunk ending in "\u20"
+        // waiting for "1c" in the next chunk) so escapes split across two stream
+        // chunks are decoded server-side instead of leaking raw into the UI.
+        let contentCarry = '';
 
         const send = (event: StreamEvent): void => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         };
 
+        const flushCarry = (): void => {
+          if (!contentCarry) return;
+          const decoded = decodeEscapedText(contentCarry);
+          contentCarry = '';
+          if (decoded) send({ type: 'content', text: decoded });
+        };
+
         const emitText = (text: string, forceStatus: boolean): void => {
-          const decoded = decodeEscapedText(text);
-          if (!decoded) return;
-          if (forceStatus || isStatusMessage(decoded)) {
-            const statusText = decoded.trim();
+          if (!text) return;
+          const probe = decodeEscapedText(text);
+          if (forceStatus || isStatusMessage(probe)) {
+            const statusText = probe.trim();
             if (statusText) send({ type: 'status', text: statusText });
             return;
           }
-          send({ type: 'content', text: decoded });
+          // Content path: combine with any carried partial escape, then hold back
+          // a new trailing partial escape sequence for the next chunk.
+          const combined = contentCarry + text;
+          contentCarry = '';
+          let emitPart = combined;
+          const tail = combined.match(/\\+(?:u[0-9a-fA-F]{0,3})?$/);
+          if (tail && typeof tail.index === 'number' && combined.length - tail.index <= 6) {
+            contentCarry = combined.slice(tail.index);
+            emitPart = combined.slice(0, tail.index);
+          }
+          if (!emitPart) return;
+          const decoded = decodeEscapedText(emitPart);
+          if (decoded) send({ type: 'content', text: decoded });
         };
 
         const processData = (data: string): void => {
@@ -290,8 +325,10 @@ export async function POST(request: NextRequest): Promise<Response> {
           if (buffer.trim()) {
             processEventBlock(buffer);
           }
+          flushCarry();
           send({ type: 'done' });
         } catch (err) {
+          flushCarry();
           const message = err instanceof Error ? err.message : 'The stream was interrupted.';
           send({ type: 'error', text: message });
         } finally {
