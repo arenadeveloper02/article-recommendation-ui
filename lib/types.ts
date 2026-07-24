@@ -47,6 +47,11 @@ export interface QAItem {
   answer: string;
 }
 
+export interface VisualOpportunity {
+  type: string;
+  suggestion: string;
+}
+
 export interface ModelOutputSection {
   id: string;
   title: string;
@@ -54,6 +59,7 @@ export interface ModelOutputSection {
   raw: string;
   badges: ModelOutputBadge[];
   qaItems: QAItem[];
+  visuals: VisualOpportunity[];
 }
 
 export interface ParsedModelOutput {

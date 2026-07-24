@@ -7,7 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model RecommendationRun {
+model RecommendationLog {
   id        String   @id @default(cuid())
   keyword   String
   client    String

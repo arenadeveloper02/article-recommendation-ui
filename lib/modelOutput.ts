@@ -4,6 +4,7 @@ import type {
   ParsedModelOutput,
   QAItem,
   SourceLink,
+  VisualOpportunity,
 } from '@/lib/types';
 
 /**
@@ -101,6 +102,96 @@ export function extractBadges(body: string): { badges: ModelOutputBadge[]; clean
   return { badges, cleaned: kept.join('\n').trim() };
 }
 
+/**
+ * Visual & table opportunity extraction. Explicit model suggestions like
+ * "Visual: ...", "Table idea: ...", "Infographic: ..." are pulled out of the
+ * section body into a dedicated callout. When the model returned NO explicit
+ * visual/table notes for a section, relevant opportunities are inferred from
+ * the section's own content (comparisons -> table, steps -> infographic,
+ * statistics -> chart, long prose -> supporting image) so every substantial H2
+ * section surfaces where a visual or table would help.
+ */
+
+const EXPLICIT_VISUAL_LINE =
+  /^\s*[-*+]?\s*(?:\*\*)?(visual(?:\s+opportunit(?:y|ies))?|suggested\s+visuals?|image(?:\s+idea)?|table(?:\s+idea|\s+opportunity)?|chart(?:\s+idea)?|infographic(?:\s+idea)?|diagram(?:\s+idea)?)(?:\*\*)?\s*:\s*(.+)$/i;
+
+const FAQ_TITLE = /faq|frequently asked|common questions/i;
+
+function visualTypeFromLabel(label: string): string {
+  const lower = label.toLowerCase();
+  if (lower.includes('table')) return 'Table';
+  if (lower.includes('chart')) return 'Chart';
+  if (lower.includes('infographic')) return 'Infographic';
+  if (lower.includes('diagram')) return 'Diagram';
+  if (lower.includes('image')) return 'Image';
+  return 'Visual';
+}
+
+function inferVisualOpportunities(title: string, body: string): VisualOpportunity[] {
+  const combined = `${title}\n${body}`;
+  const visuals: VisualOpportunity[] = [];
+  const hasMarkdownTable = /(^|\n)\s*\|.*\|\s*(\n|$)/.test(body);
+  if (
+    !hasMarkdownTable &&
+    /\b(vs\.?|versus|compar(?:e|ison|ing)|pros and cons|cost|price|pricing|types of|options|before and after)\b/i.test(
+      combined
+    )
+  ) {
+    visuals.push({
+      type: 'Table',
+      suggestion:
+        'Summarize the comparison points in this section (options, costs, pros/cons) as a scannable table.',
+    });
+  }
+  if (/\b(steps?|process|procedure|how to|timeline|stages?|phases?)\b/i.test(combined)) {
+    visuals.push({
+      type: 'Infographic',
+      suggestion:
+        'Illustrate the step-by-step process or timeline described here as a simple infographic or numbered flow graphic.',
+    });
+  }
+  if (
+    visuals.length < 2 &&
+    /\d+\s*%|\b(statistics?|survey|study|studies|data shows?)\b/i.test(combined)
+  ) {
+    visuals.push({
+      type: 'Chart',
+      suggestion: 'Turn the statistics or study data mentioned in this section into a small chart or data callout.',
+    });
+  }
+  if (visuals.length === 0 && body.trim().length > 250) {
+    visuals.push({
+      type: 'Image',
+      suggestion: 'Add a relevant supporting image or annotated photo to break up the text in this section.',
+    });
+  }
+  return visuals.slice(0, 2);
+}
+
+export function extractVisualOpportunities(
+  title: string,
+  body: string
+): { visuals: VisualOpportunity[]; cleaned: string } {
+  const visuals: VisualOpportunity[] = [];
+  const kept: string[] = [];
+  for (const line of body.split('\n')) {
+    const match = line.match(EXPLICIT_VISUAL_LINE);
+    if (match) {
+      const suggestion = match[2].replace(/\*\*/g, '').trim();
+      if (suggestion.length > 0 && suggestion.length <= 300) {
+        visuals.push({ type: visualTypeFromLabel(match[1]), suggestion });
+        continue;
+      }
+    }
+    kept.push(line);
+  }
+  const cleaned = kept.join('\n').trim();
+  if (visuals.length === 0 && !FAQ_TITLE.test(title)) {
+    visuals.push(...inferVisualOpportunities(title, cleaned));
+  }
+  return { visuals: visuals.slice(0, 3), cleaned };
+}
+
 function trimUrl(raw: string): string {
   return raw.replace(/^</, '').replace(/>$/, '').replace(/[.,;:!?]+$/, '');
 }
@@ -190,9 +281,10 @@ function firstNumberedIndex(text: string): number {
  * Structure-aware, defensive parser for model output. Strips sentinel tokens,
  * sanitizes raw HTML, splits heading sections, extracts badge metadata, pulls
  * reference URLs (sources-titled sections, markdown links there, and bare URL
- * list lines anywhere) into a dedicated sources list, and detects Q&A/FAQ-style
- * numbered lists. Never throws on malformed or partially streamed input \u2014
- * unparseable text simply lands in `intro` and renders as markdown.
+ * list lines anywhere) into a dedicated sources list, detects Q&A/FAQ-style
+ * numbered lists, and attaches visual/table opportunities to every section.
+ * Never throws on malformed or partially streamed input \u2014 unparseable text
+ * simply lands in `intro` and renders as markdown.
  */
 export function parseModelOutput(markdown: string): ParsedModelOutput {
   const cleaned = sanitizeModelMarkdown(stripSentinelTokens(markdown))
@@ -230,13 +322,14 @@ export function parseModelOutput(markdown: string): ParsedModelOutput {
       }
       const { badges, cleaned: withoutBadges } = extractBadges(rest);
       const { text: bodyText } = extractBareUrlLines(withoutBadges, sources);
-      const qaItems = parseQAItems(bodyText);
-      let body = bodyText;
+      const { visuals, cleaned: bodyWithoutVisuals } = extractVisualOpportunities(title, bodyText);
+      const qaItems = parseQAItems(bodyWithoutVisuals);
+      let body = bodyWithoutVisuals;
       if (qaItems.length > 0) {
-        const numberedAt = firstNumberedIndex(bodyText);
-        body = numberedAt > 0 ? bodyText.slice(0, numberedAt).trim() : '';
+        const numberedAt = firstNumberedIndex(bodyWithoutVisuals);
+        body = numberedAt > 0 ? bodyWithoutVisuals.slice(0, numberedAt).trim() : '';
       }
-      sections.push({ id: `section-${index}`, title, body, raw: sectionText, badges, qaItems });
+      sections.push({ id: `section-${index}`, title, body, raw: sectionText, badges, qaItems, visuals });
     } else {
       introChunks.push(sectionText);
     }

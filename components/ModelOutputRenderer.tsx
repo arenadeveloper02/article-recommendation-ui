@@ -12,8 +12,10 @@ import { parseModelOutput } from '@/lib/modelOutput';
  * model markdown and it adapts to the actual structure of the response:
  * heading sections become cards, Q&A/FAQ numbered lists become question/answer
  * entries, reference URLs become a dedicated truncated "Sources" list, and
- * anything unparseable falls back to sanitized markdown prose. Content taller
- * than the panel scrolls internally with a visible affordance.
+ * anything unparseable falls back to sanitized markdown prose. Each heading
+ * section also surfaces a "Visual & Table Opportunities" callout \u2014 explicit
+ * model suggestions when present, otherwise relevant inferred opportunities.
+ * Content taller than the panel scrolls internally with a visible affordance.
  */
 
 const PROSE_CLASSES =
@@ -162,6 +164,23 @@ export default function ModelOutputRenderer({
                 <MarkdownBlock markdown={section.body} />
               ) : (
                 <p className="mt-2 text-sm italic text-slate-400">No details were returned for this section.</p>
+              )}
+              {section.visuals.length > 0 && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                    Visual &amp; Table Opportunities
+                  </h4>
+                  <ul className="mt-2 space-y-2">
+                    {section.visuals.map((visual, index) => (
+                      <li key={`${section.id}-visual-${index}`} className="flex items-start gap-2">
+                        <span className="mt-0.5 inline-flex flex-shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                          {visual.type}
+                        </span>
+                        <span className="text-sm leading-snug text-amber-900">{visual.suggestion}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </section>
           ))}
