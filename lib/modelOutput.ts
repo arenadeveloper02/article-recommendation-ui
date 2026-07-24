@@ -19,7 +19,7 @@ const SENTINEL_PATTERN =
 
 /**
  * Removes completion/control sentinel tokens (e.g. [DONE], [END], <|endoftext|>)
- * ANYWHERE in the text \u2014 end of a line, appended to a URL, mid-list \u2014 not just at
+ * ANYWHERE in the text - end of a line, appended to a URL, mid-list - not just at
  * the very end of the full response.
  */
 export function stripSentinelTokens(input: string): string {
@@ -103,17 +103,45 @@ export function extractBadges(body: string): { badges: ModelOutputBadge[]; clean
 }
 
 /**
- * Visual & table opportunity extraction. Explicit model suggestions like
- * "Visual: ...", "Table idea: ...", "Infographic: ..." are pulled out of the
- * section body into a dedicated callout. When the model returned NO explicit
- * visual/table notes for a section, relevant opportunities are inferred from
- * the section's own content (comparisons -> table, steps -> infographic,
- * statistics -> chart, long prose -> supporting image) so every substantial H2
- * section surfaces where a visual or table would help.
+ * Visual & table opportunity extraction.
+ *
+ * FIX (section-to-suggestion association): explicit inline notes like
+ * "Visual / Table Opportunities: Red-flag callout box." were previously NOT
+ * recognized by the label regex (it only matched labels such as "Visual:" or
+ * "Table idea:", never the combined "Visual / Table Opportunities" form). The
+ * un-recognized note stayed in the body while the callout card fell back to an
+ * INFERRED suggestion (e.g. a generic comparison table), so the rendered card
+ * disagreed with that section's own inline text - across every section and
+ * heading level where the combined label was used.
+ *
+ * The extraction below is strictly per-section (it only ever sees the body of
+ * the single section it is called for - suggestions can never bleed between
+ * sections) and now:
+ *   1. Recognizes combined labels ("Visual / Table Opportunities", "Visual &
+ *      Table Opportunity", "Table/Visual Opportunities", etc.) in plain, bold,
+ *      bulleted, numbered, or heading form.
+ *   2. Supports a label-only line (e.g. a "Visual / Table Opportunities"
+ *      sub-heading) followed by its suggestion(s) on the next line(s).
+ *   3. NEVER infers replacement suggestions for a section that contained an
+ *      explicit visual/table label - inference only runs when the model gave
+ *      no visual note at all for that section, so the card always mirrors the
+ *      section's own inline text 1:1 whenever one exists.
  */
 
-const EXPLICIT_VISUAL_LINE =
-  /^\s*[-*+]?\s*(?:\*\*)?(visual(?:\s+opportunit(?:y|ies))?|suggested\s+visuals?|image(?:\s+idea)?|table(?:\s+idea|\s+opportunity)?|chart(?:\s+idea)?|infographic(?:\s+idea)?|diagram(?:\s+idea)?)(?:\*\*)?\s*:\s*(.+)$/i;
+const VISUAL_LABEL_PATTERN =
+  'visuals?(?:\\s*(?:\\/|&|\\+|and|or)\\s*tables?)?(?:\\s+opportunit(?:y|ies))?|suggested\\s+visuals?|image(?:\\s+idea)?|tables?(?:\\s*(?:\\/|&|\\+|and|or)\\s*visuals?)?(?:\\s+idea|\\s+opportunit(?:y|ies))?|chart(?:\\s+idea)?|infographic(?:\\s+idea)?|diagram(?:\\s+idea)?';
+
+/** Label followed by a colon and the suggestion on the same line. */
+const EXPLICIT_VISUAL_LINE = new RegExp(
+  '^\\s*(?:[-*+]\\s+|\\d+[.)]\\s+)?(' + VISUAL_LABEL_PATTERN + ')\\s*:\\s*(.+)$',
+  'i'
+);
+
+/** Label alone on its own line (optionally as a sub-heading), suggestion(s) follow. */
+const EXPLICIT_VISUAL_LABEL_ONLY = new RegExp(
+  '^\\s*(?:[-*+]\\s+|\\d+[.)]\\s+)?(' + VISUAL_LABEL_PATTERN + ')\\s*:?\\s*$',
+  'i'
+);
 
 const FAQ_TITLE = /faq|frequently asked|common questions/i;
 
@@ -125,6 +153,32 @@ function visualTypeFromLabel(label: string): string {
   if (lower.includes('diagram')) return 'Diagram';
   if (lower.includes('image')) return 'Image';
   return 'Visual';
+}
+
+/** Best-effort visual type from free text (used for combined "Visual / Table" labels). */
+function detectVisualTypeFromText(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (lower.includes('table')) return 'Table';
+  if (lower.includes('chart') || lower.includes('graph')) return 'Chart';
+  if (lower.includes('infographic')) return 'Infographic';
+  if (lower.includes('diagram') || lower.includes('flowchart') || lower.includes('flow chart')) return 'Diagram';
+  if (lower.includes('image') || lower.includes('photo') || lower.includes('illustration')) return 'Image';
+  return null;
+}
+
+/**
+ * Resolves the badge type for an explicit suggestion. Combined labels like
+ * "Visual / Table Opportunities" name BOTH kinds, so the type comes from the
+ * suggestion text itself (falling back to the generic "Visual"); single-type
+ * labels keep their original label-based mapping.
+ */
+function visualTypeFor(label: string, suggestion: string): string {
+  const lower = label.toLowerCase();
+  const isCombinedLabel = lower.includes('visual') && lower.includes('table');
+  if (isCombinedLabel) {
+    return detectVisualTypeFromText(suggestion) ?? 'Visual';
+  }
+  return visualTypeFromLabel(label);
 }
 
 function inferVisualOpportunities(title: string, body: string): VisualOpportunity[] {
@@ -174,19 +228,63 @@ export function extractVisualOpportunities(
 ): { visuals: VisualOpportunity[]; cleaned: string } {
   const visuals: VisualOpportunity[] = [];
   const kept: string[] = [];
+  // Scoped strictly to THIS section's body: suggestions found here attach here
+  // and nowhere else, so there is no cross-section index/zip pairing to drift.
+  let sawExplicitLabel = false;
+  let pendingLabel: string | null = null;
+  let pendingRemaining = 0;
+
+  const pushVisual = (label: string, rawSuggestion: string): boolean => {
+    const suggestion = rawSuggestion.replace(/\*\*/g, '').trim();
+    if (suggestion.length === 0 || suggestion.length > 300) return false;
+    visuals.push({ type: visualTypeFor(label, suggestion), suggestion });
+    return true;
+  };
+
   for (const line of body.split('\n')) {
-    const match = line.match(EXPLICIT_VISUAL_LINE);
-    if (match) {
-      const suggestion = match[2].replace(/\*\*/g, '').trim();
-      if (suggestion.length > 0 && suggestion.length <= 300) {
-        visuals.push({ type: visualTypeFromLabel(match[1]), suggestion });
+    // Normalize for matching only (bold markers + heading hashes); the original
+    // line is what gets kept in the body when it is not a visual note.
+    const normalized = line.replace(/\*\*/g, '').replace(/^\s*#{1,6}\s+/, '');
+
+    if (pendingLabel !== null && pendingRemaining > 0) {
+      const isHeading = /^\s*#{1,6}\s/.test(line);
+      const continuation = normalized.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+      if (!isHeading && continuation.length > 0 && continuation.length <= 300) {
+        pushVisual(pendingLabel, continuation);
+        pendingRemaining -= 1;
         continue;
       }
+      pendingLabel = null;
+      pendingRemaining = 0;
     }
+
+    const inlineMatch = normalized.match(EXPLICIT_VISUAL_LINE);
+    if (inlineMatch) {
+      sawExplicitLabel = true;
+      if (pushVisual(inlineMatch[1], inlineMatch[2])) continue;
+      continue;
+    }
+
+    const labelOnlyMatch = normalized.match(EXPLICIT_VISUAL_LABEL_ONLY);
+    if (
+      labelOnlyMatch &&
+      (/opportunit|suggested/i.test(labelOnlyMatch[1]) || /:\s*$/.test(normalized.trim()))
+    ) {
+      sawExplicitLabel = true;
+      pendingLabel = labelOnlyMatch[1];
+      pendingRemaining = 3;
+      continue;
+    }
+
     kept.push(line);
   }
+
   const cleaned = kept.join('\n').trim();
-  if (visuals.length === 0 && !FAQ_TITLE.test(title)) {
+  // Only infer when the model gave NO explicit visual/table note for this
+  // section. If an explicit label was present (even if its suggestion could not
+  // be captured), never substitute an inferred suggestion - that is what caused
+  // the rendered card to disagree with the section's own inline text.
+  if (visuals.length === 0 && !sawExplicitLabel && !FAQ_TITLE.test(title)) {
     visuals.push(...inferVisualOpportunities(title, cleaned));
   }
   return { visuals: visuals.slice(0, 3), cleaned };
@@ -283,8 +381,10 @@ function firstNumberedIndex(text: string): number {
  * reference URLs (sources-titled sections, markdown links there, and bare URL
  * list lines anywhere) into a dedicated sources list, detects Q&A/FAQ-style
  * numbered lists, and attaches visual/table opportunities to every section.
- * Never throws on malformed or partially streamed input \u2014 unparseable text
- * simply lands in `intro` and renders as markdown.
+ * Visual/table extraction runs on each section's OWN body in isolation, so a
+ * suggestion can only ever appear under the section it was written in. Never
+ * throws on malformed or partially streamed input - unparseable text simply
+ * lands in `intro` and renders as markdown.
  */
 export function parseModelOutput(markdown: string): ParsedModelOutput {
   const cleaned = sanitizeModelMarkdown(stripSentinelTokens(markdown))
@@ -326,59 +426,61 @@ export function parseModelOutput(markdown: string): ParsedModelOutput {
       const qaItems = parseQAItems(bodyWithoutVisuals);
       let body = bodyWithoutVisuals;
       if (qaItems.length > 0) {
-        const numberedAt = firstNumberedIndex(bodyWithoutVisuals);
-        body = numberedAt > 0 ? bodyWithoutVisuals.slice(0, numberedAt).trim() : '';
+        const qaStart = firstNumberedIndex(bodyWithoutVisuals);
+        body = qaStart > 0 ? bodyWithoutVisuals.slice(0, qaStart).trim() : '';
       }
-      sections.push({ id: `section-${index}`, title, body, raw: sectionText, badges, qaItems, visuals });
-    } else {
-      introChunks.push(sectionText);
+      sections.push({
+        id: `section-${index}`,
+        title,
+        body,
+        raw: sectionText,
+        badges,
+        qaItems,
+        visuals,
+      });
+      return;
     }
+    introChunks.push(sectionText);
   });
 
-  let intro = extractBareUrlLines(introChunks.join('\n\n'), sources).text;
-
-  let qaItems: QAItem[] = [];
-  if (sections.length === 0) {
-    qaItems = parseQAItems(intro);
-    if (qaItems.length > 0) {
-      const numberedAt = firstNumberedIndex(intro);
-      intro = numberedAt > 0 ? intro.slice(0, numberedAt).trim() : '';
-    }
+  const introRaw = introChunks.join('\n\n').trim();
+  const { text: introText } = extractBareUrlLines(introRaw, sources);
+  const topQAItems = sections.length === 0 ? parseQAItems(introText) : [];
+  let intro = introText;
+  if (topQAItems.length > 0) {
+    const qaStart = firstNumberedIndex(introText);
+    intro = qaStart > 0 ? introText.slice(0, qaStart).trim() : '';
   }
 
   const hasContent =
-    intro.trim().length > 0 || sections.length > 0 || qaItems.length > 0 || sources.length > 0;
+    intro.trim().length > 0 || sections.length > 0 || topQAItems.length > 0 || sources.length > 0;
 
-  return { intro: intro.trim(), sections, qaItems, sources, hasContent };
+  return { intro, sections, qaItems: topQAItems, sources, hasContent };
 }
 
-/**
- * Converts markdown to clean plain text for PDF export: strips heading markers,
- * bold/italic/inline-code syntax, converts links to "text (url)", and
- * normalizes list bullets. Keeps paragraph breaks intact.
- */
+/** Converts model markdown to plain text suitable for PDF export. */
 export function markdownToPlainText(markdown: string): string {
-  return stripSentinelTokens(markdown)
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/^#{1,6}\s+/gm, '')
+  const cleaned = sanitizeModelMarkdown(stripSentinelTokens(markdown));
+  return cleaned
+    .replace(/```[\s\S]*?(?:```|$)/g, '')
+    .replace(/^\s*#{1,6}\s+/gm, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
-    .replace(/^\s*[-*+]\s+/gm, '\u2022 ')
-    .replace(/^\s*>\s?/gm, '')
-    .replace(/\|/g, ' ')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1 ($2)')
+    .replace(/^\s*[-*+]\s+/gm, '- ')
+    .replace(/&lt;/g, '<')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-/** Filesystem-safe slug: lowercase, hyphens instead of spaces/special chars. */
-export function sanitizeForFilename(value: string): string {
-  const slug = value
-    .toLowerCase()
+/** Produces a safe, slug-style filename fragment from arbitrary user input. */
+export function sanitizeForFilename(input: string): string {
+  const slug = input
     .trim()
+    .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60);
-  return slug || 'untitled';
+  return slug || 'export';
 }
