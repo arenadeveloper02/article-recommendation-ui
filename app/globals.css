@@ -1,15 +1,18 @@
+@import './arena-ds-tokens.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Arena DS surface: grey/50 page background with subtle brand-blue washes,
+   grey/900 primary text, Poppins via next/font. */
 body {
   min-height: 100vh;
-  background-color: #f7f6f3;
+  background-color: #f7f8f9;
   background-image:
-    radial-gradient(900px 420px at 50% -10%, rgba(99, 102, 241, 0.09), transparent 70%),
-    radial-gradient(700px 380px at 90% 110%, rgba(139, 92, 246, 0.07), transparent 70%);
+    radial-gradient(900px 420px at 50% -10%, rgba(26, 115, 232, 0.08), transparent 70%),
+    radial-gradient(700px 380px at 90% 110%, rgba(0, 167, 214, 0.06), transparent 70%);
   background-attachment: fixed;
-  color: #141b33;
+  color: #2c2d33;
 }
 
 @keyframes fade-in-up {
@@ -24,7 +27,7 @@ body {
 }
 
 .animate-fade-in-up {
-  animation: fade-in-up 0.35s ease-out both;
+  animation: fade-in-up 0.3s cubic-bezier(0, 0, 0.2, 1) both;
 }
 
 @keyframes gradient-slide {
@@ -37,7 +40,7 @@ body {
 }
 
 .gradient-progress {
-  background-image: linear-gradient(90deg, #6366f1, #a78bfa, #38bdf8, #6366f1);
+  background-image: linear-gradient(90deg, #1a73e8, #679fef, #00a7d6, #1a73e8);
   background-size: 200% 100%;
   animation: gradient-slide 1.4s linear infinite;
 }
@@ -46,7 +49,7 @@ body {
    so tall results scroll inside the card instead of extending the page. */
 .scroll-panel {
   scrollbar-width: thin;
-  scrollbar-color: rgba(99, 102, 241, 0.35) transparent;
+  scrollbar-color: rgba(26, 115, 232, 0.35) transparent;
 }
 
 .scroll-panel::-webkit-scrollbar {
@@ -58,12 +61,12 @@ body {
 }
 
 .scroll-panel::-webkit-scrollbar-thumb {
-  background-color: rgba(99, 102, 241, 0.35);
+  background-color: rgba(26, 115, 232, 0.35);
   border-radius: 9999px;
 }
 
 .scroll-panel::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(99, 102, 241, 0.55);
+  background-color: rgba(26, 115, 232, 0.55);
 }
 
 @media (prefers-reduced-motion: reduce) {

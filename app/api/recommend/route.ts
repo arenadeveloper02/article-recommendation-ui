@@ -6,8 +6,8 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 const WORKFLOW_ENDPOINT =
-  'https://test-agent.thearena.ai/api/workflows/22222756-700a-464c-b643-a8c11e92e64b/execute';
-const WORKFLOW_API_KEY = 'sk-sim-amPAyUKDZNygmERaDmxwJBgkMabZvYXr';
+  'https://agent.thearena.ai/api/workflows/09e8e4e6-4b9c-4126-95f2-cbfcfd025f63/execute';
+const WORKFLOW_API_KEY = 'sk-sim-Vk9yj3QfVSZxJ8lulZTYK549u5ThZo9u';
 
 const TEXT_KEYS = ['chunk', 'content', 'text', 'output', 'answer', 'result', 'message'];
 const SSE_FIELD_PATTERN = /^(?:data|event|id|retry):|^:/;
@@ -330,20 +330,18 @@ export async function POST(request: NextRequest): Promise<Response> {
           flushCarry();
           send({ type: 'done' });
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Stream error while reading the recommendation service response.';
-          try {
-            send({ type: 'error', text: message });
-          } catch {
-            // Controller already closed \u2014 nothing else to send.
-          }
+          const message = err instanceof Error ? err.message : 'The recommendation stream failed.';
+          send({ type: 'error', text: message });
         } finally {
           try {
             controller.close();
           } catch {
-            // Controller already closed.
+            // Controller may already be closed.
           }
         }
+      },
+      cancel() {
+        void reader.cancel();
       },
     });
 
@@ -352,6 +350,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
       },
     });
   } catch (err) {

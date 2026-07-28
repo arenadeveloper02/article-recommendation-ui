@@ -1,21 +1,22 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-24T09:58:24.990Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-28T10:45:31.662Z.
 
 ## Overview
 
-Article Recommendation Agent UI: turn a target keyword and client into writer-ready article recommendations with streamed model output, section cards, and per-section Visual & Table Opportunities callouts.
+Article Recommendation Agent UI that turns a target keyword and client into writer-ready article recommendations via the Arena workflow API, with streamed output, PDF export, and Arena DS theming.
 
 **Repository:** `article-recommendation-ui`  
-**File count:** 24
+**File count:** 29
 
 ## Features
 
-- Streamed article recommendations from a workflow agent
-- Defensive model-output parsing into section cards
-- Per-section Visual & Table Opportunities callouts keyed to each section's own inline notes
-- Q&A/FAQ extraction and Sources list
-- Copy to clipboard and PDF download
+- Streamed article recommendations from the Arena workflow endpoint
+- Defensive model-output parsing with sections, Q&A, sources, and visual opportunities
+- Copy to clipboard and PDF download of recommendations
+- Brief generator with markdown rendering and .md download
+- Arena Design System theme (brand blue, grey scale, Poppins)
+- Arena email gating via middleware and access-denied page
 
 ## Tech Stack
 
@@ -32,6 +33,7 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 ## Routes & Pages
 
 - `/` — `app/page.tsx`
+- `/access-denied` — `app/access-denied/page.tsx`
 
 ## Database Models
 
@@ -41,6 +43,8 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 
 ### App pages
 
+- `app/access-denied/page.tsx`
+- `app/arena-ds-tokens.css`
 - `app/error.tsx`
 - `app/globals.css`
 - `app/layout.tsx`
@@ -57,9 +61,12 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 - `components/BriefGeneratorClient.tsx`
 - `components/ModelOutputRenderer.tsx`
 - `components/RecommendationClient.tsx`
+- `components/arena-email-provider.tsx`
 
 ### Libraries
 
+- `lib/arena-email-constants.ts`
+- `lib/arena-email.ts`
 - `lib/modelOutput.ts`
 - `lib/prisma.ts`
 - `lib/types.ts`
@@ -68,9 +75,9 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 ### Config
 
 - `.env.example`
+- `middleware.ts`
 - `next-env.d.ts`
 - `next.config.ts`
-- `package-lock.json`
 - `package.json`
 - `postcss.config.mjs`
 - `tailwind.config.ts`
@@ -86,8 +93,10 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 - `.env.example`
 - `README.md`
 - `REPO_SUMMARY.md`
+- `app/access-denied/page.tsx`
 - `app/api/generate/route.ts`
 - `app/api/recommend/route.ts`
+- `app/arena-ds-tokens.css`
 - `app/error.tsx`
 - `app/globals.css`
 - `app/layout.tsx`
@@ -96,12 +105,15 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 - `components/BriefGeneratorClient.tsx`
 - `components/ModelOutputRenderer.tsx`
 - `components/RecommendationClient.tsx`
+- `components/arena-email-provider.tsx`
+- `lib/arena-email-constants.ts`
+- `lib/arena-email.ts`
 - `lib/modelOutput.ts`
 - `lib/prisma.ts`
 - `lib/types.ts`
+- `middleware.ts`
 - `next-env.d.ts`
 - `next.config.ts`
-- `package-lock.json`
 - `package.json`
 - `postcss.config.mjs`
 - `prisma/schema.prisma`
@@ -110,29 +122,12 @@ Article Recommendation Agent UI: turn a target keyword and client into writer-re
 
 ## Latest Change
 
-- **Updated at:** 2026-07-24T09:58:24.990Z
-- **Request:** === SCOPE LOCK: BUG-FIX-ONLY MODE ===
-This is a bug-fix request, not a redesign request. Apply ONLY the fix described below. Do not restyle, reposition, resize, reorder, or refactor anything else in the app, even if you notice other things that look improvable.
+- **Updated at:** 2026-07-28T10:45:31.662Z
+- **Request:** change the theme, 
 
-=== BUG: "VISUAL / TABLE OPPORTUNITIES" CALLOUT SHOWS THE WRONG SECTION'S SUGGESTION (SYSTEMIC, NOT LIMITED TO ONE HEADING) ===
-Observed behavior: under multiple headings throughout the document (not limited to one H3, and not limited to H3-level headings specifically), the inline writing-instructions text states one "Visual / Table Opportunities" suggestion, but the rendered "VISUAL & TABLE OPPORTUNITIES" callout card displayed directly below that heading shows a DIFFERENT suggestion — one that appears to belong to another section elsewhere in the document.
-
-Confirmed example: under the H3 "When to call your dentist after implant surgery," the inline text says:
-  "Visual / Table Opportunities: Red-flag callout box."
-but the rendered card shows:
-  "TABLE — Summarize the comparison points in this section (options, costs, pros/cons) as a scannable table."
-This same kind of mismatch (inline text says one thing, rendered card shows another section's suggestion) recurs at other headings in the document too — this is a general, document-wide mapping problem, not a one-off or a heading-level-specific issue.
-
-Expected behavior: for EVERY heading/section in the document, the rendered "VISUAL & TABLE OPPORTUNITIES" card must match the suggestion stated in that same section's own inline "Visual / Table Opportunities:" text — 1:1, every time, regardless of heading level or position in the document.
-
-Likely root cause to investigate: since this happens across multiple sections and heading levels (not isolated to one spot), look for a systemic issue in how "Visual/Table Opportunities" data is associated with sections — e.g.:
-  - Suggestions being matched to sections by array/list index rather than by a stable per-section id, so any insertion/reordering/off-by-one shifts every suggestion after it.
-  - A shared/global accumulator or blockId being reused or mis-scoped across sections during streaming, causing suggestion data to bleed from one section into another.
-  - Section boundaries (headings) and suggestion boundaries being parsed independently and then zipped together assuming they arrive in matching order/count, which breaks if either list is generated with a different number of items or in a different order than expected.
-Trace the actual code path that pairs each heading with its "Visual/Table Opportunities" suggestion and fix the association so it's keyed to the correct originating section everywhere in the document, not just the one example above.
-
-Do not change: callout card styling, the "TABLE" badge design, section layout/order, or any other part of the page. Fix only the section-to-suggestion association logic so inline text and rendered card always agree, for every section in the document.
+chaneg the base url from https://test-agent.thearena.ai/
+to https://agent.thearena.ai/api/workflows/09e8e4e6-4b9c-4126-95f2-cbfcfd025f63/execute
 
 
-NOTE:
-MAKE SURE THAT ITTOUCHES ONLY THEABOVE CHANEGE
+and change the API key to 
+sk-sim-Vk9yj3QfVSZxJ8lulZTYK549u5ThZo9u
