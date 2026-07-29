@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { StreamEvent } from '@/lib/types';
-import { stripSentinelTokens } from '@/lib/modelOutput';
+import { stripSentinelTokens, unwrapJsonString } from '@/lib/modelOutput';
+import { decodeDisplayText } from '@/lib/textDecode';
 import { getArenaEmailId } from '@/lib/arena-email';
 
 export const maxDuration = 300;
@@ -17,49 +18,17 @@ const SSE_FIELD_PATTERN = /^(?:data|event|id|retry):|^:/;
 const SENTINEL_ONLY_PATTERN = /^\[?\s*(?:DONE|END|EOS|EOF|STOP|COMPLETE|FINISHED)\s*\]?$/i;
 
 /**
- * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
- * and double-escaped sequences produced when the upstream workflow
- * JSON.stringify()s an already-stringified payload (double encoding). Runs up
- * to two passes so nested encodings fully resolve to real characters before
- * any text reaches the browser.
+ * UNICODE DECODING: this route previously used its own weaker local decoder
+ * (max two passes, at most two leading backslashes per escape). Deeply
+ * double/triple-escaped upstream payloads therefore leaked literal \uXXXX
+ * sequences (\u201c, \u201d, \u2018, \u2019, \u2026, \u2013, \u2014 \u2026) into the streamed
+ * frames the loading view renders. The route now delegates ALL decoding to
+ * the single shared, generic decoder in lib/textDecode.ts (decodeDisplayText),
+ * the same one used by /api/generate, /api/history and every client surface,
+ * so streamed chunks, non-streamed JSON, and status frames are all decoded
+ * identically before any text leaves the server. The client additionally
+ * re-runs the same decoder on the accumulated stream as defense in depth.
  */
-function decodeEscapedText(input: string): string {
-  let current = input;
-  for (let pass = 0; pass < 2; pass += 1) {
-    if (!current.includes('\\')) break;
-    const next = current
-      .replace(/\\{1,2}u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-      .replace(/\\{1,2}r\\{1,2}n/g, '\n')
-      .replace(/\\{1,2}n/g, '\n')
-      .replace(/\\{1,2}t/g, '\t')
-      .replace(/\\{1,2}r/g, '\n')
-      .replace(/\\{1,2}\"/g, '"');
-    if (next === current) break;
-    current = next;
-  }
-  return current;
-}
-
-/**
- * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
- * is STILL a quoted JSON string (the upstream stringified it twice), parse it
- * again until we reach the plain text. JSON.parse here also natively decodes
- * unicode escapes, which is the preferred (lossless) decode path.
- */
-function unwrapJsonString(text: string): string {
-  let current = text.trim();
-  for (let i = 0; i < 3; i += 1) {
-    if (current.length < 2 || !current.startsWith('"') || !current.endsWith('"')) break;
-    try {
-      const parsed = JSON.parse(current) as unknown;
-      if (typeof parsed !== 'string') break;
-      current = parsed.trim();
-    } catch {
-      break;
-    }
-  }
-  return current;
-}
 
 /** Heuristic detection of heartbeat/progress messages that must not pollute the answer. */
 function isStatusMessage(text: string): boolean {
@@ -178,7 +147,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         'X-API-Key': WORKFLOW_API_KEY,
         'Content-Type': 'application/json',
       },
-      // Updated API contract: stream disabled and NO selectedOutputs — the
+      // Updated API contract: stream disabled and NO selectedOutputs \u2014 the
       // workflow returns the full result as plain JSON. The SSE branch below
       // is kept purely as a defensive fallback should the upstream ever
       // respond with an event stream anyway.
@@ -206,8 +175,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Non-streamed JSON path (the expected path with stream:false): extract the
     // best content string and return plain JSON.
     // ORDER MATTERS: unwrapJsonString first (JSON.parse natively decodes
-    // escapes in double-stringified payloads), THEN the multi-pass decoder,
-    // THEN sentinel stripping so completion markers never reach the UI.
+    // escapes in double-stringified payloads), THEN the shared generic
+    // multi-pass decoder (any escape, any nesting depth), THEN sentinel
+    // stripping so completion markers never reach the UI.
     if (!upstreamType.includes('text/event-stream') || !upstream.body) {
       const rawText = await upstream.text();
       let parsed: unknown;
@@ -220,7 +190,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         extractLongestContent(parsed) ??
         (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
       return NextResponse.json({
-        content: stripSentinelTokens(decodeEscapedText(unwrapJsonString(extracted))),
+        content: stripSentinelTokens(decodeDisplayText(unwrapJsonString(extracted))),
       });
     }
 
@@ -242,14 +212,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const flushCarry = (): void => {
           if (!contentCarry) return;
-          const decoded = stripSentinelTokens(decodeEscapedText(contentCarry));
+          const decoded = stripSentinelTokens(decodeDisplayText(contentCarry));
           contentCarry = '';
           if (decoded) send({ type: 'content', text: decoded });
         };
 
         const emitText = (text: string, forceStatus: boolean): void => {
           if (!text) return;
-          const probe = decodeEscapedText(text);
+          const probe = decodeDisplayText(text);
           if (forceStatus || isStatusMessage(probe)) {
             const statusText = stripSentinelTokens(probe).trim();
             if (statusText) send({ type: 'status', text: statusText });
@@ -264,7 +234,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             emitPart = combined.slice(0, tail.index);
           }
           if (!emitPart) return;
-          const decoded = stripSentinelTokens(decodeEscapedText(emitPart));
+          const decoded = stripSentinelTokens(decodeDisplayText(emitPart));
           if (decoded) send({ type: 'content', text: decoded });
         };
 
@@ -322,15 +292,20 @@ export async function POST(request: NextRequest): Promise<Response> {
             }
           }
           buffer += decoder.decode();
-          if (buffer.trim()) processEventBlock(buffer);
+          if (buffer.trim()) {
+            processEventBlock(buffer);
+          }
           flushCarry();
           send({ type: 'done' });
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Stream error.';
+          const message = err instanceof Error ? err.message : 'The stream was interrupted.';
           send({ type: 'error', text: message });
         } finally {
           controller.close();
         }
+      },
+      cancel() {
+        void reader.cancel();
       },
     });
 

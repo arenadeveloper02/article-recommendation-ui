@@ -322,12 +322,11 @@ export default function RecommendationClient() {
       const finalContent = cleanForDisplay(accumulated);
       if (!finalContent.trim()) {
         setErrorMessage(
-          streamError || 'The agent returned an empty response. Please try generating again.'
+          streamError || 'The agent returned an empty response. Please try again.'
         );
         setPhase('error');
         return;
       }
-
       setContent(finalContent);
       recordHistory(kw, cl, finalContent);
       setPhase('done');
@@ -345,16 +344,16 @@ export default function RecommendationClient() {
     const kw = keyword.trim();
     const cl = client.trim();
     const errors: FieldErrors = {};
-    if (!kw) errors.keyword = 'A target keyword is required.';
-    if (!cl) errors.client = 'A client or brand name is required.';
+    if (!kw) errors.keyword = 'Please enter a target keyword.';
+    if (!cl) errors.client = 'Please enter a client or brand name.';
     setFieldErrors(errors);
     if (errors.keyword || errors.client) return;
     void runRequest(kw, cl);
   };
 
   const handleRetry = (): void => {
-    const kw = keyword.trim() || activeRun.keyword;
-    const cl = client.trim() || activeRun.client;
+    const kw = keyword.trim();
+    const cl = client.trim();
     if (!kw || !cl) {
       setPhase('idle');
       return;
@@ -362,7 +361,15 @@ export default function RecommendationClient() {
     void runRequest(kw, cl);
   };
 
+  const handleCancel = (): void => {
+    if (abortRef.current) abortRef.current.abort();
+    setPhase('idle');
+    setContent('');
+    setStatusMessage('');
+  };
+
   const handleCopy = async (text: string): Promise<void> => {
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -374,63 +381,335 @@ export default function RecommendationClient() {
   };
 
   const handlePrint = async (): Promise<void> => {
+    // Ensure the self-hosted Poppins faces bundled by next/font are loaded so
+    // the SAME on-screen fonts are embedded in the printed PDF.
     try {
       await document.fonts.ready;
     } catch {
-      // Fonts API unavailable — print anyway.
+      // Printing proceeds even if the font readiness check fails.
     }
     window.print();
   };
 
-  const handleNewRun = (): void => {
-    if (abortRef.current) abortRef.current.abort();
-    setPhase('idle');
-    setContent('');
-    setStatusMessage('');
-    setErrorMessage('');
-    setCopied(false);
-    setView('generator');
-    setViewingEntry(null);
-  };
+  const stagesDone = Math.min(stageIndex, STAGES.length - 1);
+  const progressPercent = Math.min(95, Math.round(((stagesDone + 0.5) / STAGES.length) * 100));
 
-  const totalEstimate = STAGES.reduce((sum, stage) => sum + stage.seconds, 0);
-  const progressPercent = Math.min(96, Math.round((elapsed / totalEstimate) * 100));
-  const currentTip = tips[tipIndex % tips.length];
+  const renderResultPanel = (entry: { keyword: string; client: string; text: string; timestamp: string | null }) => (
+    <div id="print-area" className="mt-6">
+      <div className="print-header hidden">
+        <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
+          Article Recommendations
+        </p>
+        <h2 className="mt-1 font-display text-xl font-semibold text-ink">
+          {entry.keyword}
+          {entry.client ? ` \u2014 ${entry.client}` : ''}
+        </h2>
+        {entry.timestamp && (
+          <p className="mt-1 text-xs text-slate-500">Generated {formatTimestamp(entry.timestamp)}</p>
+        )}
+      </div>
+      <ModelOutputRenderer content={entry.text} showSourcesFallback />
+    </div>
+  );
 
-  /* ------------------------------ History view ------------------------------ */
-  if (view === 'history') {
-    return (
-      <div className="w-full">
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">Run History</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Previous article recommendations for this session and your saved runs.
-            </p>
-          </div>
+  return (
+    <div className="mx-auto w-full max-w-4xl">
+      <header className="print-hide mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-indigo-500">Arena SEO Tools</p>
+          <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+            Article Recommendation Agent
+          </h1>
+          <p className="mt-2 max-w-xl text-sm text-slate-500">
+            Turn a target keyword and client into writer-ready article recommendations.
+          </p>
+        </div>
+        <nav className="flex gap-2" aria-label="Views">
           <button
             type="button"
             onClick={() => {
               setView('generator');
               setViewingEntry(null);
             }}
-            className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
+              view === 'generator'
+                ? 'bg-indigo-600 text-white shadow-ds-sm'
+                : 'border border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700'
+            }`}
           >
-            &larr; Back to generator
+            Generator
           </button>
-        </div>
+          <button
+            type="button"
+            onClick={openHistory}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
+              view === 'history'
+                ? 'bg-indigo-600 text-white shadow-ds-sm'
+                : 'border border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700'
+            }`}
+          >
+            History
+          </button>
+        </nav>
+      </header>
 
-        {viewingEntry ? (
-          <div className="animate-fade-in-up">
-            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
+      {view === 'generator' && (
+        <div className="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-ds-md backdrop-blur sm:p-8">
+          <form onSubmit={handleSubmit} className="print-hide space-y-5" noValidate>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div>
+                <label htmlFor="keyword" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Target Keyword
+                </label>
+                <input
+                  id="keyword"
+                  type="text"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  placeholder="Dental implants"
+                  disabled={isStreaming}
+                  aria-invalid={Boolean(fieldErrors.keyword)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50"
+                />
+                {fieldErrors.keyword && (
+                  <p className="mt-1.5 text-xs font-medium text-red-600">{fieldErrors.keyword}</p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="client" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Client / Brand
+                </label>
+                <input
+                  id="client"
+                  type="text"
+                  value={client}
+                  onChange={(e) => setClient(e.target.value)}
+                  placeholder="42 North Dental"
+                  disabled={isStreaming}
+                  aria-invalid={Boolean(fieldErrors.client)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50"
+                />
+                {fieldErrors.client && (
+                  <p className="mt-1.5 text-xs font-medium text-red-600">{fieldErrors.client}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-slate-400">{RUNTIME_ESTIMATE}</p>
+              <button
+                type="submit"
+                disabled={isStreaming}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-ds-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300 disabled:shadow-none"
+              >
+                {isStreaming ? (
+                  <>
+                    <ButtonSpinner />
+                    Generating\u2026
+                  </>
+                ) : (
+                  'Generate Recommendations'
+                )}
+              </button>
+            </div>
+          </form>
+
+          {isStreaming && (
+            <div className="print-hide mt-8 rounded-xl border border-indigo-100 bg-indigo-50/60 p-5 animate-fade-in-up">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-indigo-800">
+                  Working on \u201c{activeRun.keyword}\u201d for {activeRun.client}
+                </p>
+                <span className="text-xs font-medium tabular-nums text-indigo-500">{elapsed}s elapsed</span>
+              </div>
+
+              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-indigo-100">
+                <div
+                  className="gradient-progress h-full rounded-full transition-all duration-1000"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+
+              <ul className="mt-4 space-y-2">
+                {STAGES.map((stage, index) => {
+                  const isDone = index < stageIndex;
+                  const isCurrent = index === stageIndex;
+                  return (
+                    <li key={stage.label} className="flex items-center gap-2.5 text-sm">
+                      {isDone ? (
+                        <svg
+                          className="h-4 w-4 flex-shrink-0 text-emerald-500"
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      ) : isCurrent ? (
+                        <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-indigo-600">
+                          <ButtonSpinner />
+                        </span>
+                      ) : (
+                        <span className="h-2 w-2 flex-shrink-0 rounded-full bg-indigo-200" aria-hidden="true" />
+                      )}
+                      <span
+                        className={
+                          isCurrent
+                            ? 'font-medium text-indigo-800'
+                            : isDone
+                              ? 'text-indigo-600'
+                              : 'text-indigo-400'
+                        }
+                      >
+                        {stage.label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {statusMessage && (
+                <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-xs text-indigo-600">{statusMessage}</p>
+              )}
+
+              <p className="mt-4 border-t border-indigo-100 pt-3 text-xs italic text-indigo-500">
+                Tip: {tips[tipIndex % tips.length]}
+              </p>
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isStreaming && content.trim().length > 0 && (
+            <div className="mt-6 animate-fade-in-up">
+              <p className="print-hide mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Live preview
+              </p>
+              <ModelOutputRenderer content={content} isStreaming />
+            </div>
+          )}
+
+          {phase === 'error' && (
+            <div className="print-hide mt-8 rounded-xl border border-red-200 bg-red-50 p-5 animate-fade-in-up">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <div className="flex-1">
+                  <h2 className="text-sm font-semibold text-red-800">Generation failed</h2>
+                  <p className="mt-1 break-words text-sm text-red-700">{errorMessage}</p>
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="mt-3 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {phase === 'done' && content.trim().length > 0 && (
+            <div className="mt-8 animate-fade-in-up">
+              <div className="print-hide flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
+                    Keyword: {activeRun.keyword}
+                  </span>
+                  {activeRun.client && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
+                      Client: {activeRun.client}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopy(content)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  >
+                    {copied ? 'Copied!' : 'Copy Markdown'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePrint()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                  >
+                    Download PDF
+                  </button>
+                </div>
+              </div>
+              {renderResultPanel({
+                keyword: activeRun.keyword,
+                client: activeRun.client,
+                text: content,
+                timestamp: new Date().toISOString(),
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === 'history' && (
+        <div className="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-ds-md backdrop-blur sm:p-8">
+          {viewingEntry ? (
+            <div className="animate-fade-in-up">
+              <div className="print-hide flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  onClick={() => setViewingEntry(null)}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  \u2190 Back to history
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopy(viewingEntry.content)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  >
+                    {copied ? 'Copied!' : 'Copy Markdown'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePrint()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                  >
+                    Download PDF
+                  </button>
+                </div>
+              </div>
+              <div className="print-hide mt-4 flex flex-wrap items-center gap-2">
                 {viewingEntry.keyword && (
-                  <span className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
                     Keyword: {viewingEntry.keyword}
                   </span>
                 )}
                 {viewingEntry.client && (
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
                     Client: {viewingEntry.client}
                   </span>
                 )}
@@ -438,347 +717,84 @@ export default function RecommendationClient() {
                   <span className="text-xs text-slate-400">{formatTimestamp(viewingEntry.timestamp)}</span>
                 )}
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleCopy(viewingEntry.content)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
-                  {copied ? 'Copied!' : 'Copy Markdown'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewingEntry(null)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                >
-                  All runs
-                </button>
-              </div>
+              {renderResultPanel({
+                keyword: viewingEntry.keyword,
+                client: viewingEntry.client,
+                text: viewingEntry.content,
+                timestamp: viewingEntry.timestamp,
+              })}
             </div>
-            <div id="print-area">
-              <div className="print-header hidden">
-                <p className="text-lg font-semibold text-ink">Article Recommendations</p>
-                <p className="text-sm text-slate-500">
-                  Keyword: {viewingEntry.keyword || '\u2014'} &middot; Client: {viewingEntry.client || '\u2014'}
-                </p>
-              </div>
-              <ModelOutputRenderer content={viewingEntry.content} />
-            </div>
-          </div>
-        ) : (
-          <div className="animate-fade-in-up">
-            {historyLoading && (
-              <div className="flex flex-col items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-10 text-center">
-                <ButtonSpinner />
-                <p className="text-sm font-medium text-indigo-800">Loading your previous runs\u2026</p>
-              </div>
-            )}
-
-            {!historyLoading && historyError && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-5">
-                <p className="text-sm text-red-700">{historyError}</p>
+          ) : (
+            <div className="animate-fade-in-up">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-display text-lg font-semibold text-ink">Previous runs</h2>
                 <button
                   type="button"
                   onClick={() => void loadRemoteHistory()}
-                  className="mt-3 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+                  disabled={historyLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Retry
+                  {historyLoading && <ButtonSpinner />}
+                  Refresh
                 </button>
               </div>
-            )}
 
-            {!historyLoading && !historyError && mergedHistory.length === 0 && (
-              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                <p className="text-sm font-medium text-slate-600">No runs yet</p>
-                <p className="mt-1 text-sm text-slate-400">
-                  Generate your first article recommendation and it will appear here.
+              {historyLoading && mergedHistory.length === 0 && (
+                <div className="mt-6 flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-6 text-sm text-indigo-700">
+                  <ButtonSpinner />
+                  Loading your previous runs\u2026
+                </div>
+              )}
+
+              {historyError && (
+                <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {historyError}
                 </p>
-              </div>
-            )}
+              )}
 
-            {!historyLoading && mergedHistory.length > 0 && (
-              <ul className="space-y-3">
-                {mergedHistory.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCopied(false);
-                        setViewingEntry(entry);
-                      }}
-                      className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-indigo-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        {entry.keyword && (
-                          <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-medium text-indigo-700">
-                            {entry.keyword}
-                          </span>
-                        )}
-                        {entry.client && (
-                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700">
-                            {entry.client}
-                          </span>
-                        )}
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                            entry.source === 'session'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : 'bg-slate-50 text-slate-500'
-                          }`}
-                        >
-                          {entry.source === 'session' ? 'This session' : 'Saved run'}
-                        </span>
-                        {entry.timestamp && (
-                          <span className="ml-auto text-[11px] text-slate-400">
-                            {formatTimestamp(entry.timestamp)}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-2 truncate text-sm font-medium text-ink">{extractTitle(entry.content)}</p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
+              {!historyLoading && mergedHistory.length === 0 && !historyError && (
+                <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  No runs yet. Generate your first recommendation from the Generator tab.
+                </p>
+              )}
 
-  /* ----------------------------- Generator view ----------------------------- */
-  return (
-    <div className="w-full">
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">
-            Article Recommendation Agent
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Turn a target keyword and client into writer-ready article recommendations.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={openHistory}
-          className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-        >
-          View history
-        </button>
-      </div>
-
-      <div className="rounded-2xl border border-indigo-100/80 bg-white/90 p-5 shadow-lg shadow-indigo-200/30 backdrop-blur sm:p-8">
-        <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-          <div>
-            <label htmlFor="keyword" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Target Keyword
-            </label>
-            <input
-              id="keyword"
-              type="text"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="Dental implants"
-              disabled={isStreaming}
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50"
-            />
-            {fieldErrors.keyword && (
-              <p className="mt-1 text-xs text-red-600">{fieldErrors.keyword}</p>
-            )}
-          </div>
-          <div>
-            <label htmlFor="client" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Client / Brand
-            </label>
-            <input
-              id="client"
-              type="text"
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              placeholder="42 North Dental"
-              disabled={isStreaming}
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50"
-            />
-            {fieldErrors.client && (
-              <p className="mt-1 text-xs text-red-600">{fieldErrors.client}</p>
-            )}
-          </div>
-          <button
-            type="submit"
-            disabled={isStreaming}
-            className="inline-flex h-[42px] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white shadow-md shadow-indigo-300/50 transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300 disabled:shadow-none"
-          >
-            {isStreaming ? (
-              <>
-                <ButtonSpinner />
-                Generating\u2026
-              </>
-            ) : (
-              'Generate'
-            )}
-          </button>
-        </form>
-      </div>
-
-      {isStreaming && (
-        <div className="mt-6 animate-fade-in-up rounded-2xl border border-indigo-100 bg-white/90 p-5 shadow-lg shadow-indigo-200/30 sm:p-8">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-semibold text-indigo-800">
-              {statusMessage || STAGES[stageIndex].label}
-            </p>
-            <p className="text-xs text-slate-400">
-              {RUNTIME_ESTIMATE} &middot; {elapsed}s elapsed
-            </p>
-          </div>
-
-          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-indigo-50">
-            <div
-              className="gradient-progress h-full rounded-full transition-all duration-1000"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-
-          <ul className="mt-5 space-y-2">
-            {STAGES.map((stage, index) => {
-              const isDone = index < stageIndex;
-              const isCurrent = index === stageIndex;
-              return (
-                <li key={stage.label} className="flex items-center gap-2.5 text-sm">
-                  {isDone ? (
-                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                      <svg
-                        className="h-3 w-3"
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
+              {mergedHistory.length > 0 && (
+                <ul className="mt-5 space-y-3">
+                  {mergedHistory.map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        type="button"
+                        onClick={() => setViewingEntry(entry)}
+                        className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-indigo-300 hover:shadow-ds-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                       >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </span>
-                  ) : isCurrent ? (
-                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-indigo-600">
-                      <ButtonSpinner />
-                    </span>
-                  ) : (
-                    <span className="h-5 w-5 flex-shrink-0 rounded-full border-2 border-slate-200" />
-                  )}
-                  <span
-                    className={
-                      isDone
-                        ? 'text-slate-400 line-through'
-                        : isCurrent
-                        ? 'font-medium text-ink'
-                        : 'text-slate-400'
-                    }
-                  >
-                    {stage.label}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-
-          <div className="mt-5 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-400">While you wait</p>
-            <p className="mt-1 text-sm text-indigo-800">{currentTip}</p>
-          </div>
-
-          {content.trim().length > 0 && (
-            <div className="mt-6">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Live preview
-              </p>
-              <ModelOutputRenderer content={content} isStreaming />
+                        <p className="line-clamp-2 text-sm font-semibold text-ink">
+                          {extractTitle(entry.content)}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {entry.keyword && (
+                            <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                              {entry.keyword}
+                            </span>
+                          )}
+                          {entry.client && (
+                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                              {entry.client}
+                            </span>
+                          )}
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
+                            {entry.source === 'session' ? 'This session' : 'Saved'}
+                          </span>
+                          {entry.timestamp && (
+                            <span className="text-[11px] text-slate-400">{formatTimestamp(entry.timestamp)}</span>
+                          )}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {phase === 'error' && (
-        <div className="mt-6 animate-fade-in-up rounded-xl border border-red-200 bg-red-50 p-5">
-          <div className="flex items-start gap-3">
-            <svg
-              className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                fillRule="evenodd"
-                d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <div className="flex-1">
-              <h2 className="text-sm font-semibold text-red-800">Generation failed</h2>
-              <p className="mt-1 break-words text-sm text-red-700">{errorMessage}</p>
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="mt-3 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {phase === 'done' && content.trim().length > 0 && (
-        <div className="mt-6 animate-fade-in-up">
-          <div className="print-hide mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              {activeRun.keyword && (
-                <span className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                  Keyword: {activeRun.keyword}
-                </span>
-              )}
-              {activeRun.client && (
-                <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                  Client: {activeRun.client}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCopy(content)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              >
-                {copied ? 'Copied!' : 'Copy Markdown'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handlePrint()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              >
-                Download PDF
-              </button>
-              <button
-                type="button"
-                onClick={handleNewRun}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              >
-                New run
-              </button>
-            </div>
-          </div>
-
-          <div id="print-area">
-            <div className="print-header hidden">
-              <p className="text-lg font-semibold text-ink">Article Recommendations</p>
-              <p className="text-sm text-slate-500">
-                Keyword: {activeRun.keyword || '\u2014'} &middot; Client: {activeRun.client || '\u2014'}
-              </p>
-            </div>
-            <ModelOutputRenderer content={content} showSourcesFallback />
-          </div>
         </div>
       )}
     </div>
