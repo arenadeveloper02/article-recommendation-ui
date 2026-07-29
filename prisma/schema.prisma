@@ -11,7 +11,6 @@ model RecommendationRun {
   id        String   @id @default(cuid())
   emailId   String
   keyword   String
-  client    String   @default("")
-  output    String
+  client    String
   createdAt DateTime @default(now())
 }

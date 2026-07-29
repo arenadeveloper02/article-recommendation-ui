@@ -1,10 +1,10 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-29T13:09:18.317Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-29T13:22:25.196Z.
 
 ## Overview
 
-Arena-embedded UI that turns a target keyword and client into writer-ready article recommendations, with streaming progress, decoded model output (no raw \uXXXX escapes), history, and print-to-PDF.
+Article recommendation agent UI that turns a target keyword and client into writer-ready SEO article recommendations, with unicode-escape decoding so model output always renders real characters.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 31
@@ -12,11 +12,10 @@ Arena-embedded UI that turns a target keyword and client into writer-ready artic
 ## Features
 
 - Keyword + client recommendation generator backed by the Arena workflow
-- Robust multi-pass decoding so escape sequences like \u201c, \u201d and \u2026 always render as their real characters
-- Pipeline progress stages, rotating tips and elapsed timer while the agent works
-- Session + remote history view scoped to the Arena email
-- Structured model-output rendering with FAQ blocks, sources and visual opportunities
-- Print-this-view PDF export sharing the on-screen DOM
+- Robust multi-pass unicode escape decoding (\u201c, \u201d, \u2026, dashes) for streamed and stored output
+- Staged loading progress with rotating tips and elapsed timer
+- History view merging session runs with remote workflow history
+- Print-friendly PDF export of the rendered recommendation
 
 ## Tech Stack
 
@@ -126,10 +125,14 @@ Arena-embedded UI that turns a target keyword and client into writer-ready artic
 
 ## Latest Change
 
-- **Updated at:** 2026-07-29T13:09:18.317Z
-- **Request:** Don't show this kind in the UI. 
-\u201c
-\u201d
-\u2026
-
-show the values of these .
+- **Updated at:** 2026-07-29T13:22:25.196Z
+- **Request:** During the loading, the data is shown in Unicode. Convert to Character 
+Quick Reference: Common Unicode Escapes
+Escape	Character	Name
+\u201c	"	Left double quotation mark
+\u201d	"	Right double quotation mark
+\u2018	'	Left single quotation mark
+\u2019	'	Right single quotation mark
+\u2026	…	Horizontal ellipsis
+\u2013	–	En dash
+\u2014	—	Em dash
