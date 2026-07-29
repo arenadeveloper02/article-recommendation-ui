@@ -169,6 +169,7 @@ body {
 
   /* Print-only report header (hidden on screen via Tailwind `hidden`). */
   .print-header {
+    display: block !important;
     margin-bottom: 18px;
     padding-bottom: 12px;
     border-bottom: 2px solid #1a73e8;
@@ -247,11 +248,37 @@ body {
     display: none !important;
   }
 
-  /* FAQ blocks keep identical screen typography and never split a
-     question from its answer across a page break. */
+  /* FAQ blocks keep IDENTICAL screen typography in the PDF and never
+     split a question from its answer across a page break. The same
+     .faq-question / .faq-answer type styles are reasserted here so the
+     printed output cannot drift from the on-screen rendering. */
   .faq-item {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #e2e3e5;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  .faq-item:last-child {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+  }
+
+  .faq-question {
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.45;
+    color: #2c2d33;
+  }
+
+  .faq-answer {
+    margin-top: 6px;
+    font-weight: 400;
+    line-height: 1.6;
+    color: #41444d;
+    max-width: 68ch;
   }
 
   .animate-fade-in-up,

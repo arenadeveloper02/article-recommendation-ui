@@ -1,9 +1,3 @@
-// Prisma schema for article-recommendation-ui.
-// Recommendations are generated on demand via the upstream workflow; the
-// RecommendationRun model below records generation requests so the schema
-// defines at least one model for the live database. Additive changes only:
-// never edit or drop existing columns.
-
 generator client {
   provider = "prisma-client-js"
 }

@@ -1,20 +1,20 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-29T10:56:07.075Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-29T11:15:31.284Z.
 
 ## Overview
 
-Web UI that turns a target keyword and client into writer-ready article recommendations (including a structured FAQ section) with a print-faithful Download PDF feature that reuses the exact on-screen DOM via a dedicated @media print stylesheet.
+Article Recommendation Agent UI that turns a target keyword and client into writer-ready article recommendations, with structured FAQ formatting and a print-ready PDF view.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 29
 
 ## Features
 
-- Keyword + client recommendation form with streamed model output
-- Adaptive model-output renderer (sections, badges, sources, visual/table opportunities)
-- Semantic FAQ blocks (.faq-item / .faq-question / .faq-answer) with question and answer on separate lines
-- Print-this-view PDF export: A4 page, embedded Poppins fonts, page-break-inside: avoid on cards, table rows and FAQ items
+- Streamed article recommendations from the Arena workflow
+- Semantic FAQ blocks with question/answer separation and print-safe page breaks
+- Widened, responsive main content container (max-w-6xl)
+- Print-this-view PDF export with dedicated @media print stylesheet
 - Arena email gate with access-denied page and iframe-safe headers
 
 ## Tech Stack
@@ -121,24 +121,10 @@ Web UI that turns a target keyword and client into writer-ready article recommen
 
 ## Latest Change
 
-- **Updated at:** 2026-07-29T10:56:07.075Z
-- **Request:** My app renders keyword recommendation results (including an FAQ section) in a web UI, and I have a "Download PDF" feature. Currently the PDF looks broken compared to the UI — bad spacing, missing fonts, broken cards/tables — and specifically the FAQ section renders each Q&A as a single run-on paragraph (bold question inline immediately followed by the answer), which is cramped and hard to scan in both the UI and the PDF.
+- **Updated at:** 2026-07-29T11:15:31.284Z
+- **Request:** Need to fix the below 2 items: 
 
-Please fix both:
-
-1. General PDF fidelity
-
-Reuse the exact same HTML/CSS component that renders the UI for PDF generation, instead of a separate PDF template — the goal is "print this view," not "generate new markup."
-Add a dedicated @media print stylesheet that:
-Fixes container widths (no vw/viewport-relative widths) so cards and tables don't overflow or clip.
-Sets page-break-inside: avoid on cards, table rows, and any block that shouldn't split across pages.
-Converts flex/grid layouts that don't render well in the PDF engine into simpler block/table layouts if needed.
-Removes UI-only elements (buttons, hover states, tooltips, scrollbars).
-Explicitly embeds the same fonts and icon sets used in the UI (base64 or @font-face with bundled files) so the PDF doesn't fall back to default system fonts.
-If using a headless-browser renderer (Puppeteer/Playwright), wait for all fonts, images, and dynamic content to fully load (waitUntil: 'networkidle0' or an explicit "ready" signal) before generating the PDF.
-Set a fixed page size (A4/Letter) and margins, and test long content (keyword lists, FAQ sections) for correct pagination, with headers repeating if tables span multiple pages.
-
-2. FAQ section formatting
+1.  FAQ section formatting
 
 Restructure each FAQ item into a distinct block:
 Question on its own line, bold, font-weight ~500, 15-16px.
@@ -148,4 +134,15 @@ Use semantic structure: wrap each Q&A in a <div class="faq-item">, with <p class
 Add page-break-inside: avoid on .faq-item so a question and its answer never split across a PDF page break, and make sure the same typography/spacing applies in @media print as on screen.
 Keep line-height 1.5-1.6 on answers and avoid full-bleed text width for readability.
 
-Show me the updated HTML/CSS for one FAQ item plus the print stylesheet changes so I can review before applying across the full app.
+
+
+2. 
+On the Article Recommendation Agent page, the main content (title, input form, and results card) is currently centered in a narrow fixed-width container, leaving large empty gray margins on the left and right sides of the screen. Please increase the width of this container without changing anything else about the design.
+
+Requirements:
+
+Increase the container's max-width from its current value (appears to be ~750-800px) to approximately 1100-1200px, so it better fills the available screen width.
+Keep the container horizontally centered.
+Do NOT change: font sizes, input field heights, button sizes/colors, card padding, border-radius, spacing between the title/subtitle/form, or the layout structure of any component.
+Keep the top navigation bar ('Agents > Article Recommendation Agent') and the right-side floating toolbar icons exactly where they are — only the main content container should widen.
+Make sure this stays responsive: on smaller screens (below ~1024px), the container should still shrink/behave as it currently does so nothing breaks or overflows.

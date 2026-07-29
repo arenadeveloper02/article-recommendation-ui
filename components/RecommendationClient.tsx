@@ -79,7 +79,7 @@ export default function RecommendationClient() {
 
     setPhase('streaming');
     setContent('');
-    setStatusMessage('Connecting to the recommendation agent…');
+    setStatusMessage('Connecting to the recommendation agent\u2026');
     setErrorMessage('');
     setCopied(false);
 
@@ -239,7 +239,7 @@ export default function RecommendationClient() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl">
+    <div className="mx-auto w-full max-w-6xl">
       <div className="rounded-2xl border border-indigo-100/80 bg-white/90 p-6 shadow-xl shadow-indigo-200/40 backdrop-blur sm:p-10">
         <div className="text-center">
           <h1 className="font-display text-3xl font-bold tracking-tight text-ink sm:text-4xl">
@@ -288,7 +288,7 @@ export default function RecommendationClient() {
           >
             {isStreaming ? (
               <span className="inline-flex items-center justify-center gap-2">
-                <ButtonSpinner /> Generating…
+                <ButtonSpinner /> Generating\u2026
               </span>
             ) : (
               'Get Recommendations'
@@ -303,7 +303,7 @@ export default function RecommendationClient() {
             <div className="gradient-progress h-full w-full" />
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-indigo-800">{statusMessage || 'Working on your recommendations…'}</p>
+            <p className="text-sm font-medium text-indigo-800">{statusMessage || 'Working on your recommendations\u2026'}</p>
             <p className="text-xs text-indigo-500">{elapsed}s elapsed</p>
           </div>
           {content.trim().length > 0 && (
@@ -315,7 +315,7 @@ export default function RecommendationClient() {
       )}
 
       {phase === 'error' && (
-        <div className="animate-fade-in-up mt-6 rounded-2xl border border-red-200 bg-red-50 p-6">
+        <div className="animate-fade-in-up mt-6 rounded-2xl border border-red-200 bg-red-50 p-5">
           <div className="flex items-start gap-3">
             <svg
               className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
@@ -345,51 +345,70 @@ export default function RecommendationClient() {
         </div>
       )}
 
-      {phase === 'done' && (
-        <div className="animate-fade-in-up mt-6 rounded-2xl border border-indigo-100 bg-white/90 p-6 shadow-lg shadow-indigo-100/50 backdrop-blur sm:p-8">
-          <div className="print-hide flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
-                Keyword: {keyword.trim()}
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
-                Client: {client.trim()}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCopy()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              >
-                {copied ? 'Copied!' : 'Copy Markdown'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDownloadPdf()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
-              >
-                Download PDF
-              </button>
-              <button
-                type="button"
-                onClick={handleGenerateMore}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              >
-                Generate Again
-              </button>
-            </div>
+      {phase === 'done' && content.trim().length > 0 && (
+        <div id="print-area" className="animate-fade-in-up mt-6">
+          {/* Print-only report header (revealed by the @media print stylesheet). */}
+          <div className="print-header hidden">
+            <h2 className="font-display text-xl font-bold text-ink">Article Recommendations</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Keyword: {keyword.trim()} \u00b7 Client: {client.trim()}
+            </p>
           </div>
 
-          {/* This is the ONLY region visible when printing — the PDF is a
-              faithful print of this exact on-screen markup. */}
-          <div id="print-area" className="mt-5">
-            <div className="print-header hidden print:block">
-              <h1 className="font-display text-2xl font-bold text-ink">Article Recommendations</h1>
-              <p className="mt-1 text-sm text-slate-600">
-                Keyword: {keyword.trim()} · Client: {client.trim()}
-              </p>
+          <div className="rounded-2xl border border-indigo-100 bg-white/90 p-6 shadow-lg shadow-indigo-100/50 backdrop-blur">
+            <div className="print-hide mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
+                  Keyword: {keyword.trim()}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
+                  Client: {client.trim()}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCopy()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  {copied ? (
+                    <>
+                      <svg
+                        className="h-4 w-4 text-emerald-500"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      Copied!
+                    </>
+                  ) : (
+                    'Copy Markdown'
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadPdf()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                >
+                  Download PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGenerateMore}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  Regenerate
+                </button>
+              </div>
             </div>
+
             <ModelOutputRenderer content={content} showSourcesFallback />
           </div>
         </div>
