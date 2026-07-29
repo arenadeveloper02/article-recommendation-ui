@@ -7,10 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model RecommendationRun {
+// Additive model (the live baseline has no models yet). Records recommendation
+// generation requests for basic usage visibility. Safe for `prisma db push`
+// against the existing database: it only ADDS a new table.
+model RecommendationRequest {
   id        String   @id @default(cuid())
-  emailId   String?
   keyword   String
   client    String
+  emailId   String?
   createdAt DateTime @default(now())
 }

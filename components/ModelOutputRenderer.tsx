@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,6 +22,100 @@ import { parseModelOutput } from '@/lib/modelOutput';
 const PROSE_CLASSES =
   'prose prose-sm prose-slate mt-2 max-w-none break-words prose-headings:font-display prose-headings:font-semibold prose-headings:text-ink prose-a:text-indigo-600 prose-strong:text-ink prose-li:my-1 prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-td:px-3 prose-td:py-2';
 
+/* ------------------------------------------------------------------------ */
+/* Inline FAQ normalization.                                                 */
+/*                                                                           */
+/* Some model responses emit FAQ entries as a SINGLE line/paragraph where    */
+/* the bold "Q:" question and the "A:" answer run together inline, e.g.:     */
+/*   - **Q: How long do implants last?** A: With good care, 20+ years.      */
+/* These never reach the structured QAList, so they used to render as one   */
+/* run-on paragraph. splitInlineQA() rewrites such lines (and soft-wrapped   */
+/* Q/A pairs) into two separate markdown blocks BEFORE rendering, and the    */
+/* custom `p` renderer below tags them with .faq-q-line / .faq-a-line so     */
+/* app/globals.css can style them: question on its own line, answer on a     */
+/* new line 8px below with a 16px indent, and 24px between full items.      */
+/* Applies to EVERY matching FAQ line in the content, not just the first.   */
+/* All other markdown passes through completely untouched.                   */
+/* ------------------------------------------------------------------------ */
+
+/** A line containing BOTH a leading Q: question and an inline A: answer. */
+const INLINE_QA_LINE =
+  /^(\s*(?:(?:[-*+]|\d+[.)])\s+)?)((?:\*\*)?\s*Q\s*[:.].+?)\s+((?:\*\*)?A\s*[:.](?:\*\*)?\s+\S.*)$/;
+
+/** A line that starts an answer ("A: ..." / "**A:** ..."). */
+const ANSWER_START = /^\s*(?:\*\*)?A\s*[:.](?:\*\*)?\s+/;
+
+/** A line that starts a question ("Q: ..." / "- **Q: ..."). */
+const QUESTION_START = /^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*)?\s*Q\s*[:.]/;
+
+function splitInlineQA(markdown: string): string {
+  if (!markdown.includes('Q')) return markdown;
+  const lines = markdown.split('\n');
+  const out: string[] = [];
+  let inFence = false;
+
+  for (const line of lines) {
+    // Never rewrite inside code fences.
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+
+    // Case 1: question and answer run together on ONE line. Split them into
+    // two blocks; inside list items the answer keeps the item's content
+    // indentation so it stays a continuation paragraph of the same item.
+    const inlineMatch = line.match(INLINE_QA_LINE);
+    if (inlineMatch) {
+      const prefix = inlineMatch[1];
+      const question = inlineMatch[2].trim();
+      const answer = inlineMatch[3].trim();
+      const indent = ' '.repeat(prefix.length);
+      out.push(prefix + question);
+      out.push('');
+      out.push(indent + answer);
+      continue;
+    }
+
+    // Case 2: soft-wrapped pair — an "A:" line directly following a "Q:"
+    // line inside the same paragraph (single newline). Insert a blank line so
+    // markdown renders the answer as its own block instead of merging both
+    // into one paragraph.
+    if (ANSWER_START.test(line)) {
+      const prev = out.length > 0 ? out[out.length - 1] : '';
+      if (prev.trim().length > 0 && QUESTION_START.test(prev)) {
+        const bullet = prev.match(/^(\s*)((?:[-*+]|\d+[.)])\s+)/);
+        if (bullet) {
+          out.push('');
+          out.push(' '.repeat(bullet[0].length) + line.trim());
+          continue;
+        }
+        out.push('');
+      }
+    }
+
+    out.push(line);
+  }
+
+  return out.join('\n');
+}
+
+/** Recursively extracts the plain text of rendered markdown children. */
+function extractPlainText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractPlainText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    const childProps = (node as { props?: { children?: ReactNode } }).props;
+    return childProps ? extractPlainText(childProps.children) : '';
+  }
+  return '';
+}
+
 const markdownComponents: Components = {
   a: ({ href, children }) => (
     <a
@@ -34,13 +128,29 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
+  // Tag Q/A paragraphs (produced or already present in the markdown) with
+  // semantic classes so the stylesheet can render them as visually distinct
+  // blocks: bold question on its own line, indented answer 8px below, and
+  // 24px separation between full FAQ items. All other paragraphs render
+  // exactly as before.
+  p: ({ children }) => {
+    const text = extractPlainText(children);
+    if (/^\s*Q\s*[:.]/.test(text)) {
+      return <p className="faq-q-line">{children}</p>;
+    }
+    if (/^\s*A\s*[:.]/.test(text)) {
+      return <p className="faq-a-line">{children}</p>;
+    }
+    return <p>{children}</p>;
+  },
 };
 
 function MarkdownBlock({ markdown }: { markdown: string }) {
+  const processed = useMemo(() => splitInlineQA(markdown), [markdown]);
   return (
     <div className={PROSE_CLASSES}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
-        {markdown}
+        {processed}
       </ReactMarkdown>
     </div>
   );
@@ -48,9 +158,9 @@ function MarkdownBlock({ markdown }: { markdown: string }) {
 
 /**
  * FAQ list. Each Q&A is a distinct semantic block:
- *   <div class="faq-item">          — 16px bottom spacing + divider, break-inside: avoid
+ *   <div class="faq-item">          — 24px bottom spacing + divider, break-inside: avoid
  *     <p class="faq-question">      — its own line, 15px, weight 500
- *     <div class="faq-answer">      — next line, normal weight, 6px top margin, 1.6 line-height
+ *     <div class="faq-answer">      — next line, normal weight, 8px top margin, 16px indent
  * The classes are styled in app/globals.css so the screen stylesheet and the
  * @media print stylesheet can target them independently while sharing the
  * exact same typography and spacing.
