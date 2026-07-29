@@ -10,13 +10,6 @@ const WORKFLOW_ENDPOINT =
   'https://agent.thearena.ai/api/workflows/09e8e4e6-4b9c-4126-95f2-cbfcfd025f63/execute';
 const WORKFLOW_API_KEY = 'sk-sim-Vk9yj3QfVSZxJ8lulZTYK549u5ThZo9u';
 
-/** Workflow outputs requested from the agent, per the updated API contract. */
-const SELECTED_OUTPUTS = [
-  'briefgeneration.content',
-  'self-qaalignment.content',
-  'patternanalysis.content',
-];
-
 const TEXT_KEYS = ['chunk', 'content', 'text', 'output', 'answer', 'result', 'message'];
 const SSE_FIELD_PATTERN = /^(?:data|event|id|retry):|^:/;
 
@@ -25,10 +18,10 @@ const SENTINEL_ONLY_PATTERN = /^\[?\s*(?:DONE|END|EOS|EOF|STOP|COMPLETE|FINISHED
 
 /**
  * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
- * sequences (\u201c) and double-escaped sequences (\\u201c) produced when the
- * upstream workflow JSON.stringify()s an already-stringified payload (double
- * encoding). Runs up to two passes so nested encodings fully resolve to real
- * characters before any text reaches the browser.
+ * and double-escaped sequences produced when the upstream workflow
+ * JSON.stringify()s an already-stringified payload (double encoding). Runs up
+ * to two passes so nested encodings fully resolve to real characters before
+ * any text reaches the browser.
  */
 function decodeEscapedText(input: string): string {
   let current = input;
@@ -40,7 +33,7 @@ function decodeEscapedText(input: string): string {
       .replace(/\\{1,2}n/g, '\n')
       .replace(/\\{1,2}t/g, '\t')
       .replace(/\\{1,2}r/g, '\n')
-      .replace(/\\{1,2}"/g, '"');
+      .replace(/\\{1,2}\"/g, '"');
     if (next === current) break;
     current = next;
   }
@@ -51,7 +44,7 @@ function decodeEscapedText(input: string): string {
  * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
  * is STILL a quoted JSON string (the upstream stringified it twice), parse it
  * again until we reach the plain text. JSON.parse here also natively decodes
- * \uXXXX escapes, which is the preferred (lossless) decode path.
+ * unicode escapes, which is the preferred (lossless) decode path.
  */
 function unwrapJsonString(text: string): string {
   let current = text.trim();
@@ -185,12 +178,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         'X-API-Key': WORKFLOW_API_KEY,
         'Content-Type': 'application/json',
       },
+      // Updated API contract: stream disabled and NO selectedOutputs — the
+      // workflow returns the full result as plain JSON. The SSE branch below
+      // is kept purely as a defensive fallback should the upstream ever
+      // respond with an event stream anyway.
       body: JSON.stringify({
         keyword,
         client,
         email,
-        stream: true,
-        selectedOutputs: SELECTED_OUTPUTS,
+        stream: false,
       }),
       cache: 'no-store',
     });
@@ -207,11 +203,12 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const upstreamType = upstream.headers.get('content-type') ?? '';
 
-    // Non-streamed JSON fallback: extract the best content string and return plain JSON.
-    // ORDER MATTERS: unwrapJsonString first (JSON.parse natively decodes \uXXXX in
-    // double-stringified payloads), THEN the multi-pass decoder, THEN sentinel
-    // stripping so completion markers ([DONE], [END], <|endoftext|>) never reach the UI.
-    if (upstreamType.includes('application/json') || !upstream.body) {
+    // Non-streamed JSON path (the expected path with stream:false): extract the
+    // best content string and return plain JSON.
+    // ORDER MATTERS: unwrapJsonString first (JSON.parse natively decodes
+    // escapes in double-stringified payloads), THEN the multi-pass decoder,
+    // THEN sentinel stripping so completion markers never reach the UI.
+    if (!upstreamType.includes('text/event-stream') || !upstream.body) {
       const rawText = await upstream.text();
       let parsed: unknown;
       try {
@@ -235,9 +232,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       async start(controller) {
         let buffer = '';
         let sawSse = false;
-        // Holds a trailing PARTIAL escape sequence (e.g. a chunk ending in "\u20"
-        // waiting for "1c" in the next chunk) so escapes split across two stream
-        // chunks are decoded server-side instead of leaking raw into the UI.
+        // Holds a trailing PARTIAL escape sequence so escapes split across two
+        // stream chunks are decoded server-side instead of leaking raw.
         let contentCarry = '';
 
         const send = (event: StreamEvent): void => {
@@ -259,8 +255,6 @@ export async function POST(request: NextRequest): Promise<Response> {
             if (statusText) send({ type: 'status', text: statusText });
             return;
           }
-          // Content path: combine with any carried partial escape, then hold back
-          // a new trailing partial escape sequence for the next chunk.
           const combined = contentCarry + text;
           contentCarry = '';
           let emitPart = combined;
@@ -270,9 +264,6 @@ export async function POST(request: NextRequest): Promise<Response> {
             emitPart = combined.slice(0, tail.index);
           }
           if (!emitPart) return;
-          // Strip sentinel/control tokens ANYWHERE in the decoded chunk (end of a
-          // line, appended to a URL, etc.) \u2014 the client also strips on the full
-          // accumulated text as defense-in-depth for tokens split across chunks.
           const decoded = stripSentinelTokens(decodeEscapedText(emitPart));
           if (decoded) send({ type: 'content', text: decoded });
         };
@@ -289,15 +280,12 @@ export async function POST(request: NextRequest): Promise<Response> {
             parsedOk = false;
           }
           if (parsedOk && typeof parsed === 'string') {
-            // The frame payload was a JSON string; it may STILL be a JSON-encoded
-            // string if the upstream stringified twice \u2014 unwrap before emitting.
             emitText(unwrapJsonString(parsed), false);
             return;
           }
           if (parsedOk && parsed !== null && typeof parsed === 'object') {
             const text = pickStreamText(parsed, 0);
             if (text !== null) {
-              // Same double-stringify guard for text fields nested inside objects.
               emitText(unwrapJsonString(text), isStatusEvent(parsed));
             }
             return;
@@ -315,15 +303,8 @@ export async function POST(request: NextRequest): Promise<Response> {
             processData(dataLines.join('\n'));
             return;
           }
-          const nonEmpty = lines.filter((line) => line.trim() !== '');
-          const isSseMeta = nonEmpty.length > 0 && nonEmpty.every((line) => SSE_FIELD_PATTERN.test(line));
-          if (isSseMeta) {
-            sawSse = true;
-            return;
-          }
-          if (!sawSse && block.trim()) {
-            // Raw chunked text stream: keep paragraph breaks intact.
-            emitText(`${block}\n\n`, false);
+          if (!sawSse && block.trim() && !SSE_FIELD_PATTERN.test(block.trim())) {
+            emitText(block, false);
           }
         };
 
@@ -341,13 +322,11 @@ export async function POST(request: NextRequest): Promise<Response> {
             }
           }
           buffer += decoder.decode();
-          if (buffer.trim()) {
-            processEventBlock(buffer);
-          }
+          if (buffer.trim()) processEventBlock(buffer);
           flushCarry();
           send({ type: 'done' });
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'The stream was interrupted.';
+          const message = err instanceof Error ? err.message : 'Stream error.';
           send({ type: 'error', text: message });
         } finally {
           controller.close();
@@ -360,7 +339,6 @@ export async function POST(request: NextRequest): Promise<Response> {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
       },
     });
   } catch (err) {

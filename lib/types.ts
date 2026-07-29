@@ -69,3 +69,22 @@ export interface ParsedModelOutput {
   sources: SourceLink[];
   hasContent: boolean;
 }
+
+/** History entry as returned by the /api/history route (remote workflow runs). */
+export interface HistoryApiEntry {
+  id: string;
+  keyword: string;
+  client: string;
+  output: string;
+}
+
+/** Unified history entry shown in the History view (session + remote). */
+export interface HistoryEntry {
+  id: string;
+  keyword: string;
+  client: string;
+  /** ISO timestamp for session runs; null for remote entries without one. */
+  timestamp: string | null;
+  content: string;
+  source: 'session' | 'remote';
+}
