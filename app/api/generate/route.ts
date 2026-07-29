@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { stripSentinelTokens } from '@/lib/modelOutput';
+import { decodeDisplayText } from '@/lib/textDecode';
 import { getArenaEmailId } from '@/lib/arena-email';
 
 export const maxDuration = 300;
@@ -15,30 +16,6 @@ const SELECTED_OUTPUTS = [
   'self-qaalignment.content',
   'patternanalysis.content',
 ];
-
-/**
- * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
- * sequences (\u201c) and double-escaped sequences (\\u201c) produced when the
- * upstream workflow JSON.stringify()s an already-stringified payload (double
- * encoding). Runs up to two passes so nested encodings fully resolve to real
- * characters before the brief is returned to the client.
- */
-function decodeEscapedText(input: string): string {
-  let current = input;
-  for (let pass = 0; pass < 2; pass += 1) {
-    if (!current.includes('\\')) break;
-    const next = current
-      .replace(/\\{1,2}u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)))
-      .replace(/\\{1,2}r\\{1,2}n/g, '\n')
-      .replace(/\\{1,2}n/g, '\n')
-      .replace(/\\{1,2}t/g, '\t')
-      .replace(/\\{1,2}r/g, '\n')
-      .replace(/\\{1,2}"/g, '"');
-    if (next === current) break;
-    current = next;
-  }
-  return current;
-}
 
 /**
  * Unwraps double-stringified payloads: if a value that was already JSON.parse'd
@@ -160,10 +137,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       (typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2));
 
     // ORDER MATTERS: unwrap double-stringified strings first (JSON.parse natively
-    // decodes \uXXXX), then run the multi-pass decoder, then strip completion
-    // sentinels ([DONE], [END], <|endoftext|>) anywhere in the text so the client
-    // always receives clean markdown.
-    const brief = stripSentinelTokens(decodeEscapedText(unwrapJsonString(rawBrief)));
+    // decodes \uXXXX), then run the robust multi-pass decoder (handles single,
+    // double, and deeper-nested escapes like \u201c / \u201d / \u2026 so the UI
+    // always shows the real characters), then strip completion sentinels
+    // ([DONE], [END], <|endoftext|>) anywhere in the text so the client always
+    // receives clean markdown.
+    const brief = stripSentinelTokens(decodeDisplayText(unwrapJsonString(rawBrief)));
 
     return NextResponse.json({ brief, raw: parsed });
   } catch (err) {

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ModelOutputRenderer from '@/components/ModelOutputRenderer';
 import type { HistoryApiEntry, HistoryEntry, StreamEvent } from '@/lib/types';
-import { decodeEscapedText, stripSentinelTokens, unwrapJsonString } from '@/lib/modelOutput';
+import { stripSentinelTokens, unwrapJsonString } from '@/lib/modelOutput';
+import { decodeDisplayText } from '@/lib/textDecode';
 
 type Phase = 'idle' | 'streaming' | 'done' | 'error';
 type View = 'generator' | 'history';
@@ -98,9 +99,11 @@ function ButtonSpinner() {
 }
 
 /** Full-text cleanup applied to the ACCUMULATED stream (not per chunk) so escape
- * sequences and sentinel tokens split across SSE frames are still handled. */
+ * sequences (e.g. literal \u201c, \u201d, \u2026) and sentinel tokens split
+ * across SSE frames are still decoded to their REAL character values before
+ * anything reaches the DOM. */
 function cleanForDisplay(text: string): string {
-  return stripSentinelTokens(decodeEscapedText(text));
+  return stripSentinelTokens(decodeDisplayText(text));
 }
 
 export default function RecommendationClient() {
@@ -328,7 +331,7 @@ export default function RecommendationClient() {
       recordHistory(kw, cl, finalContent);
       setPhase('done');
     } catch (err) {
-      if (controller.signal.aborted) return;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       const message = err instanceof Error ? err.message : 'Network error.';
       setErrorMessage(`Request failed: ${message}`);
       setPhase('error');
@@ -341,8 +344,8 @@ export default function RecommendationClient() {
     const kw = keyword.trim();
     const cl = client.trim();
     const errors: FieldErrors = {};
-    if (!kw) errors.keyword = 'Enter a target keyword.';
-    if (!cl) errors.client = 'Enter the client or brand name.';
+    if (!kw) errors.keyword = 'Please enter a target keyword.';
+    if (!cl) errors.client = 'Please enter the client or brand name.';
     setFieldErrors(errors);
     if (errors.keyword || errors.client) return;
     void runRequest(kw, cl);
@@ -358,12 +361,11 @@ export default function RecommendationClient() {
     void runRequest(kw, cl);
   };
 
-  const handleNewRun = (): void => {
+  const handleCancel = (): void => {
+    if (abortRef.current) abortRef.current.abort();
     setPhase('idle');
     setContent('');
-    setErrorMessage('');
     setStatusMessage('');
-    setCopied(false);
   };
 
   const handleCopy = async (text: string): Promise<void> => {
@@ -377,26 +379,40 @@ export default function RecommendationClient() {
     }
   };
 
-  const handleDownloadPdf = async (): Promise<void> => {
+  const handlePrint = async (): Promise<void> => {
     try {
       await document.fonts.ready;
     } catch {
-      // Fonts API unavailable - print anyway.
+      // Fonts may not resolve in some browsers; print anyway.
     }
     window.print();
   };
 
-  const inputClasses =
-    'w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50';
+  const handleNewRun = (): void => {
+    setPhase('idle');
+    setContent('');
+    setStatusMessage('');
+    setErrorMessage('');
+    setCopied(false);
+  };
+
+  const openHistoryEntry = (entry: HistoryEntry): void => {
+    setViewingEntry(entry);
+    setCopied(false);
+  };
+
+  const currentTip = tips.length > 0 ? tips[tipIndex % tips.length] : '';
+  const totalSeconds = STAGES.reduce((sum, stage) => sum + stage.seconds, 0);
+  const progressPercent = Math.min(96, Math.round((elapsed / totalSeconds) * 100));
 
   return (
-    <div className="mx-auto w-full max-w-4xl">
-      <header className="print-hide flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="w-full">
+      <header className="print-hide mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
+          <h1 className="font-display text-3xl font-bold tracking-tight text-ink sm:text-4xl">
             Article Recommendation Agent
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-2 max-w-2xl text-sm text-slate-500 sm:text-base">
             Turn a target keyword and client into writer-ready article recommendations.
           </p>
         </div>
@@ -407,179 +423,31 @@ export default function RecommendationClient() {
               setView('generator');
               setViewingEntry(null);
             }}
-            className={
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
               view === 'generator'
-                ? 'rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm'
-                : 'rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700'
-            }
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-300/40'
+                : 'border border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700'
+            }`}
           >
             Generator
           </button>
           <button
             type="button"
             onClick={openHistory}
-            className={
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-indigo-300 ${
               view === 'history'
-                ? 'rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm'
-                : 'rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700'
-            }
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-300/40'
+                : 'border border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700'
+            }`}
           >
             History
-            {mergedHistory.length > 0 && (
-              <span className="ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px]">
-                {mergedHistory.length}
-              </span>
-            )}
           </button>
         </nav>
       </header>
 
-      {view === 'history' ? (
-        <section className="mt-8 animate-fade-in-up">
-          {viewingEntry ? (
-            <div>
-              <div className="print-hide flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setViewingEntry(null)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
-                >
-                  &larr; Back to history
-                </button>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleCopy(viewingEntry.content)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
-                  >
-                    {copied ? 'Copied!' : 'Copy Markdown'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadPdf()}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700"
-                  >
-                    Download PDF
-                  </button>
-                </div>
-              </div>
-
-              <div className="print-hide mt-4 flex flex-wrap items-center gap-2">
-                {viewingEntry.keyword && (
-                  <span className="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
-                    Keyword: {viewingEntry.keyword}
-                  </span>
-                )}
-                {viewingEntry.client && (
-                  <span className="inline-flex items-center rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
-                    Client: {viewingEntry.client}
-                  </span>
-                )}
-                {viewingEntry.timestamp && (
-                  <span className="text-xs text-slate-400">{formatTimestamp(viewingEntry.timestamp)}</span>
-                )}
-              </div>
-
-              <div id="print-area" className="mt-4">
-                <div className="print-header hidden">
-                  <p className="text-lg font-semibold text-ink">Article Recommendations</p>
-                  <p className="text-sm text-slate-600">
-                    Keyword: {viewingEntry.keyword || '\u2014'} &middot; Client: {viewingEntry.client || '\u2014'}
-                  </p>
-                </div>
-                <ModelOutputRenderer
-                  content={viewingEntry.content}
-                  showSourcesFallback
-                  sourcesFallbackText="No sources were returned for this recommendation."
-                />
-              </div>
-            </div>
-          ) : (
-            <div>
-              <h2 className="font-display text-lg font-semibold text-ink">Previous runs</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Session runs reset on page reload; earlier runs saved for your Arena email are loaded
-                from the workflow history.
-              </p>
-
-              {historyLoading && (
-                <div className="mt-6 flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-6 text-sm text-indigo-700">
-                  <ButtonSpinner />
-                  Loading your previous runs\u2026
-                </div>
-              )}
-
-              {!historyLoading && historyError && (
-                <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4">
-                  <p className="text-sm text-red-700">{historyError}</p>
-                  <button
-                    type="button"
-                    onClick={() => void loadRemoteHistory()}
-                    className="mt-3 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-red-700"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              {!historyLoading && !historyError && mergedHistory.length === 0 && (
-                <div className="mt-6 rounded-xl border border-slate-200 bg-white p-8 text-center">
-                  <p className="text-sm text-slate-500">
-                    No runs yet. Generate your first article recommendation from the Generator tab.
-                  </p>
-                </div>
-              )}
-
-              {mergedHistory.length > 0 && (
-                <ul className="mt-6 space-y-3">
-                  {mergedHistory.map((entry) => (
-                    <li
-                      key={entry.id}
-                      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-200"
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-ink">
-                            {extractTitle(entry.content)}
-                          </p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                            {entry.keyword && (
-                              <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-medium text-indigo-700">
-                                {entry.keyword}
-                              </span>
-                            )}
-                            {entry.client && (
-                              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
-                                {entry.client}
-                              </span>
-                            )}
-                            <span className="text-[11px] text-slate-400">
-                              {entry.source === 'session'
-                                ? entry.timestamp
-                                  ? formatTimestamp(entry.timestamp)
-                                  : 'This session'
-                                : 'Saved run'}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setViewingEntry(entry)}
-                          className="flex-shrink-0 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
-                        >
-                          View
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </section>
-      ) : (
+      {view === 'generator' && (
         <div>
-          <section className="print-hide mt-8 rounded-2xl border border-indigo-100/80 bg-white/90 p-6 shadow-xl shadow-indigo-200/40 backdrop-blur sm:p-8">
+          <section className="print-hide rounded-2xl border border-indigo-100/80 bg-white/90 p-6 shadow-xl shadow-indigo-200/40 backdrop-blur sm:p-8">
             <form onSubmit={handleSubmit} className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label htmlFor="keyword" className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -592,10 +460,10 @@ export default function RecommendationClient() {
                   onChange={(e) => setKeyword(e.target.value)}
                   placeholder="Dental implants"
                   disabled={isStreaming}
-                  className={inputClasses}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50"
                 />
                 {fieldErrors.keyword && (
-                  <p className="mt-1.5 text-xs text-red-600">{fieldErrors.keyword}</p>
+                  <p className="mt-1.5 text-xs font-medium text-red-600">{fieldErrors.keyword}</p>
                 )}
               </div>
               <div>
@@ -609,10 +477,10 @@ export default function RecommendationClient() {
                   onChange={(e) => setClient(e.target.value)}
                   placeholder="42 North Dental"
                   disabled={isStreaming}
-                  className={inputClasses}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-50"
                 />
                 {fieldErrors.client && (
-                  <p className="mt-1.5 text-xs text-red-600">{fieldErrors.client}</p>
+                  <p className="mt-1.5 text-xs font-medium text-red-600">{fieldErrors.client}</p>
                 )}
               </div>
               <div className="sm:col-span-2">
@@ -630,60 +498,57 @@ export default function RecommendationClient() {
                     'Generate Recommendations'
                   )}
                 </button>
+                <p className="mt-2 text-center text-xs text-slate-400">{RUNTIME_ESTIMATE}</p>
               </div>
             </form>
           </section>
 
           {isStreaming && (
-            <section className="print-hide mt-6 rounded-2xl border border-indigo-100 bg-white/90 p-6 shadow-lg shadow-indigo-200/30 animate-fade-in-up sm:p-8">
-              <div className="flex items-center justify-between gap-3">
+            <section className="print-hide mt-6 rounded-2xl border border-indigo-100 bg-white/90 p-6 shadow-lg shadow-indigo-200/30 animate-fade-in-up">
+              <div className="flex items-center justify-between gap-4">
                 <h2 className="font-display text-base font-semibold text-ink">
                   Working on \u201c{activeRun.keyword}\u201d for {activeRun.client}
                 </h2>
-                <span className="whitespace-nowrap text-xs text-slate-400">{RUNTIME_ESTIMATE}</span>
+                <span className="whitespace-nowrap text-xs font-medium text-slate-500">{elapsed}s elapsed</span>
               </div>
 
-              <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-indigo-100">
+              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="gradient-progress h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${Math.min(95, Math.round(((stageIndex + 1) / STAGES.length) * 100))}%`,
-                  }}
+                  className="gradient-progress h-full rounded-full transition-all duration-1000"
+                  style={{ width: `${progressPercent}%` }}
                 />
               </div>
 
               <ul className="mt-5 space-y-2.5">
                 {STAGES.map((stage, index) => (
-                  <li key={stage.label} className="flex items-center gap-2.5 text-sm">
+                  <li key={stage.label} className="flex items-center gap-3 text-sm">
                     {index < stageIndex ? (
-                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                        <svg
-                          className="h-3 w-3"
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </span>
+                      <svg
+                        className="h-4 w-4 flex-shrink-0 text-emerald-500"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
                     ) : index === stageIndex ? (
-                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                      <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-indigo-600">
                         <ButtonSpinner />
                       </span>
                     ) : (
-                      <span className="h-5 w-5 flex-shrink-0 rounded-full border-2 border-slate-200" />
+                      <span className="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300" aria-hidden="true" />
                     )}
                     <span
                       className={
                         index === stageIndex
                           ? 'font-medium text-indigo-700'
                           : index < stageIndex
-                            ? 'text-slate-500'
+                            ? 'text-slate-500 line-through decoration-slate-300'
                             : 'text-slate-400'
                       }
                     >
@@ -693,23 +558,33 @@ export default function RecommendationClient() {
                 ))}
               </ul>
 
-              <div className="mt-5 flex items-center justify-between gap-3 text-xs text-slate-400">
-                <span>{elapsed}s elapsed</span>
-                {statusMessage && <span className="truncate text-indigo-500">{statusMessage}</span>}
-              </div>
-
-              <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-indigo-400">
-                  While you wait
+              {statusMessage && (
+                <p className="mt-4 rounded-lg bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700">
+                  {statusMessage}
                 </p>
-                <p className="mt-1 text-sm text-indigo-800">{tips[tipIndex % tips.length]}</p>
-              </div>
-
-              {content.trim().length > 0 && (
-                <div className="mt-6">
-                  <ModelOutputRenderer content={content} isStreaming />
-                </div>
               )}
+
+              {currentTip && (
+                <p className="mt-4 border-t border-slate-100 pt-4 text-xs italic text-slate-500">
+                  Tip: {currentTip}
+                </p>
+              )}
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-red-300 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </section>
+          )}
+
+          {isStreaming && content && (
+            <section className="mt-6 animate-fade-in-up">
+              <ModelOutputRenderer content={content} isStreaming />
             </section>
           )}
 
@@ -730,7 +605,7 @@ export default function RecommendationClient() {
                   />
                 </svg>
                 <div className="flex-1">
-                  <h2 className="text-sm font-semibold text-red-800">Generation failed</h2>
+                  <h2 className="text-sm font-semibold text-red-800">Recommendation generation failed</h2>
                   <p className="mt-1 break-words text-sm text-red-700">{errorMessage}</p>
                   <button
                     type="button"
@@ -744,17 +619,15 @@ export default function RecommendationClient() {
             </section>
           )}
 
-          {phase === 'done' && content.trim().length > 0 && (
+          {phase === 'done' && content && (
             <section className="mt-6 animate-fade-in-up">
               <div className="print-hide flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  {activeRun.keyword && (
-                    <span className="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
-                      Keyword: {activeRun.keyword}
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
+                    Keyword: {activeRun.keyword}
+                  </span>
                   {activeRun.client && (
-                    <span className="inline-flex items-center rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
                       Client: {activeRun.client}
                     </span>
                   )}
@@ -769,7 +642,7 @@ export default function RecommendationClient() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void handleDownloadPdf()}
+                    onClick={() => void handlePrint()}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
                   >
                     Download PDF
@@ -777,7 +650,7 @@ export default function RecommendationClient() {
                   <button
                     type="button"
                     onClick={handleNewRun}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                   >
                     New Run
                   </button>
@@ -786,17 +659,153 @@ export default function RecommendationClient() {
 
               <div id="print-area" className="mt-6">
                 <div className="print-header hidden">
-                  <p className="text-lg font-semibold text-ink">Article Recommendations</p>
-                  <p className="text-sm text-slate-600">
-                    Keyword: {activeRun.keyword || '\u2014'} &middot; Client: {activeRun.client || '\u2014'}
+                  <h1 className="font-display text-2xl font-bold text-ink">Article Recommendations</h1>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Keyword: {activeRun.keyword}
+                    {activeRun.client ? ` \u00b7 Client: ${activeRun.client}` : ''}
                   </p>
                 </div>
-                <ModelOutputRenderer
-                  content={content}
-                  showSourcesFallback
-                  sourcesFallbackText="No sources were returned for this recommendation."
-                />
+                <ModelOutputRenderer content={content} showSourcesFallback />
               </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {view === 'history' && (
+        <div>
+          {viewingEntry ? (
+            <section className="animate-fade-in-up">
+              <div className="print-hide flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewingEntry(null)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  >
+                    \u2190 Back to History
+                  </button>
+                  {viewingEntry.keyword && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
+                      Keyword: {viewingEntry.keyword}
+                    </span>
+                  )}
+                  {viewingEntry.client && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
+                      Client: {viewingEntry.client}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopy(viewingEntry.content)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  >
+                    {copied ? 'Copied!' : 'Copy Markdown'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePrint()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                  >
+                    Download PDF
+                  </button>
+                </div>
+              </div>
+
+              <div id="print-area" className="mt-6">
+                <div className="print-header hidden">
+                  <h1 className="font-display text-2xl font-bold text-ink">Article Recommendations</h1>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Keyword: {viewingEntry.keyword}
+                    {viewingEntry.client ? ` \u00b7 Client: ${viewingEntry.client}` : ''}
+                  </p>
+                </div>
+                <ModelOutputRenderer content={viewingEntry.content} showSourcesFallback />
+              </div>
+            </section>
+          ) : (
+            <section className="animate-fade-in-up">
+              <div className="flex items-center justify-between gap-4">
+                <h2 className="font-display text-lg font-semibold text-ink">Previous runs</h2>
+                <button
+                  type="button"
+                  onClick={() => void loadRemoteHistory()}
+                  disabled={historyLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {historyLoading ? (
+                    <>
+                      <ButtonSpinner />
+                      Loading\u2026
+                    </>
+                  ) : (
+                    'Refresh'
+                  )}
+                </button>
+              </div>
+
+              {historyError && (
+                <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {historyError}
+                </p>
+              )}
+
+              {historyLoading && mergedHistory.length === 0 && (
+                <div className="mt-6 flex items-center justify-center gap-3 rounded-2xl border border-indigo-100 bg-white/90 px-4 py-10 text-sm text-indigo-700">
+                  <ButtonSpinner />
+                  Loading your previous runs\u2026
+                </div>
+              )}
+
+              {!historyLoading && mergedHistory.length === 0 && !historyError && (
+                <div className="mt-6 rounded-2xl border border-slate-200 bg-white/90 px-4 py-10 text-center text-sm text-slate-500">
+                  No previous runs yet. Generate your first recommendation from the Generator tab.
+                </div>
+              )}
+
+              {mergedHistory.length > 0 && (
+                <ul className="mt-6 space-y-3">
+                  {mergedHistory.map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        type="button"
+                        onClick={() => openHistoryEntry(entry)}
+                        className="w-full rounded-2xl border border-slate-200 bg-white/90 p-5 text-left shadow-sm transition hover:border-indigo-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          {entry.keyword && (
+                            <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                              {entry.keyword}
+                            </span>
+                          )}
+                          {entry.client && (
+                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                              {entry.client}
+                            </span>
+                          )}
+                          <span
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                              entry.source === 'session'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : 'bg-slate-100 text-slate-500'
+                            }`}
+                          >
+                            {entry.source === 'session' ? 'This session' : 'Saved'}
+                          </span>
+                          {entry.timestamp && (
+                            <span className="ml-auto text-[11px] text-slate-400">
+                              {formatTimestamp(entry.timestamp)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-2 truncate text-sm font-medium text-ink">{extractTitle(entry.content)}</p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           )}
         </div>

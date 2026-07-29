@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { HistoryApiEntry } from '@/lib/types';
-import { decodeEscapedText, stripSentinelTokens, unwrapJsonString } from '@/lib/modelOutput';
+import { stripSentinelTokens, unwrapJsonString } from '@/lib/modelOutput';
+import { decodeDisplayText } from '@/lib/textDecode';
 import { getArenaEmailId } from '@/lib/arena-email';
 
 export const maxDuration = 120;
@@ -92,12 +93,19 @@ export async function GET(): Promise<NextResponse> {
         : {}) as Record<string, unknown>;
       const rawOutput = typeof record.output === 'string' ? record.output : '';
       if (!rawOutput.trim()) continue;
-      const output = stripSentinelTokens(decodeEscapedText(unwrapJsonString(rawOutput)));
+      // ORDER MATTERS: unwrap double-stringified JSON first (JSON.parse natively
+      // decodes \uXXXX in wrapped strings), THEN run the robust multi-pass
+      // decoder so literal escapes like \u201c / \u201d / \u2026 at ANY nesting
+      // depth become their real characters, THEN strip completion sentinels.
+      // Stored history rows are frequently double-escaped, which the previous
+      // single-pass decoder missed — that is how raw \uXXXX codes leaked into
+      // the History view.
+      const output = stripSentinelTokens(decodeDisplayText(unwrapJsonString(rawOutput)));
       if (!output.trim()) continue;
       entries.push({
         id: typeof record.id === 'string' && record.id ? record.id : `remote-${entries.length}`,
-        keyword: typeof input.keyword === 'string' ? input.keyword : '',
-        client: typeof input.client === 'string' ? input.client : '',
+        keyword: typeof input.keyword === 'string' ? decodeDisplayText(input.keyword) : '',
+        client: typeof input.client === 'string' ? decodeDisplayText(input.client) : '',
         output,
       });
     }

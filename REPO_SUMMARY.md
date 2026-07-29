@@ -1,21 +1,22 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-29T12:44:02.441Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-29T13:09:18.317Z.
 
 ## Overview
 
-Arena-embedded UI that turns a target keyword and client into writer-ready article recommendations via the Arena workflow API, with session + remote history.
+Arena-embedded UI that turns a target keyword and client into writer-ready article recommendations, with streaming progress, decoded model output (no raw \uXXXX escapes), history, and print-to-PDF.
 
 **Repository:** `article-recommendation-ui`  
-**File count:** 30
+**File count:** 31
 
 ## Features
 
-- Keyword + client form that calls the recommendation workflow
-- Staged progress indicator with rotating tips while the agent runs
-- Structured rendering of model output (sections, FAQs, sources)
-- Copy markdown and print-to-PDF of the rendered view
-- History view merging session runs with remote workflow history
+- Keyword + client recommendation generator backed by the Arena workflow
+- Robust multi-pass decoding so escape sequences like \u201c, \u201d and \u2026 always render as their real characters
+- Pipeline progress stages, rotating tips and elapsed timer while the agent works
+- Session + remote history view scoped to the Arena email
+- Structured model-output rendering with FAQ blocks, sources and visual opportunities
+- Print-this-view PDF export sharing the on-screen DOM
 
 ## Tech Stack
 
@@ -69,6 +70,7 @@ Arena-embedded UI that turns a target keyword and client into writer-ready artic
 - `lib/arena-email.ts`
 - `lib/modelOutput.ts`
 - `lib/prisma.ts`
+- `lib/textDecode.ts`
 - `lib/types.ts`
 - `prisma/schema.prisma`
 
@@ -111,6 +113,7 @@ Arena-embedded UI that turns a target keyword and client into writer-ready artic
 - `lib/arena-email.ts`
 - `lib/modelOutput.ts`
 - `lib/prisma.ts`
+- `lib/textDecode.ts`
 - `lib/types.ts`
 - `middleware.ts`
 - `next-env.d.ts`
@@ -123,7 +126,10 @@ Arena-embedded UI that turns a target keyword and client into writer-ready artic
 
 ## Latest Change
 
-- **Updated at:** 2026-07-29T12:44:02.441Z
-- **Request:** Send the type as "article_recommendation"
-for this API 
-https://agent.thearena.ai/api/workflows/38458816-0871-4c2f-8545-39654a5530cc/execute
+- **Updated at:** 2026-07-29T13:09:18.317Z
+- **Request:** Don't show this kind in the UI. 
+\u201c
+\u201d
+\u2026
+
+show the values of these .

@@ -4,14 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { BriefResult } from '@/lib/types';
+import { stripSentinelTokens, unwrapJsonString } from '@/lib/modelOutput';
+import { decodeDisplayText } from '@/lib/textDecode';
 
 const STATUS_MESSAGES = [
-  'Researching competitors\u2026',
-  'Analyzing content patterns\u2026',
-  'Mapping search intent\u2026',
-  'Drafting your brief\u2026',
-  'Structuring headings and outline\u2026',
-  'Running quality checks\u2026',
+  'Researching competitors…',
+  'Analyzing content patterns…',
+  'Mapping search intent…',
+  'Drafting your brief…',
+  'Structuring headings and outline…',
+  'Running quality checks…',
 ];
 
 type Phase = 'idle' | 'loading' | 'error' | 'result';
@@ -66,7 +68,17 @@ export default function BriefGeneratorClient() {
         setPhase('error');
         return;
       }
-      setResult({ brief: data.brief, keyword: kw, client: cl });
+      // Defensive final decode on the client: even if the API response still
+      // carries literal escape sequences (\u201c, \u201d, \u2026 …), convert
+      // them to their real character values before anything is rendered,
+      // copied, or downloaded.
+      const brief = stripSentinelTokens(decodeDisplayText(unwrapJsonString(data.brief)));
+      if (!brief.trim()) {
+        setErrorMessage('The brief could not be generated. Please try again.');
+        setPhase('error');
+        return;
+      }
+      setResult({ brief, keyword: kw, client: cl });
       setPhase('result');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Network error.';
@@ -162,7 +174,7 @@ export default function BriefGeneratorClient() {
           disabled={isLoading || keyword.trim().length === 0}
           className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-300/50 transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300 disabled:shadow-none"
         >
-          {isLoading ? 'Generating\u2026' : 'Generate Brief'}
+          {isLoading ? 'Generating…' : 'Generate Brief'}
         </button>
       </form>
 
@@ -184,7 +196,7 @@ export default function BriefGeneratorClient() {
           </svg>
           <p className="text-sm font-medium text-indigo-800">{STATUS_MESSAGES[statusIndex]}</p>
           <p className="text-xs text-indigo-500">
-            This usually takes 1\u20132 minutes \u00b7 {elapsed}s elapsed
+            {`This usually takes 1–2 minutes · ${elapsed}s elapsed`}
           </p>
         </div>
       )}

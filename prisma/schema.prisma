@@ -7,15 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Recommendation runs recorded per Arena email. Additive model only — the
-// deployed baseline defined no models, so this is a pure addition.
 model RecommendationRun {
   id        String   @id @default(cuid())
   emailId   String
   keyword   String
-  client    String
-  output    String?
+  client    String   @default("")
+  output    String
   createdAt DateTime @default(now())
-
-  @@index([emailId])
 }
