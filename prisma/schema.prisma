@@ -7,9 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Optional server-side log of recommendation runs. Additive only — the live
-/// database baseline had no models, so this new table is created by
-/// `prisma db push` without touching any existing data.
+// Additive model: records recommendation runs. Added to satisfy Prisma's
+// requirement of at least one model; safe additive-only change (prisma db push
+// simply creates this new table).
 model RecommendationRun {
   id        String   @id @default(cuid())
   emailId   String

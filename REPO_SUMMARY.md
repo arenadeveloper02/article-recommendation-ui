@@ -1,22 +1,22 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-29T13:36:32.201Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-29T13:45:22.652Z.
 
 ## Overview
 
-Arena-embedded UI that turns a target keyword and client into writer-ready SEO article recommendations, with streaming-safe Unicode decoding, history view, and print-to-PDF output.
+Article Recommendation Agent UI that turns a target keyword and client into writer-ready SEO article recommendations via the Arena workflow API, with streaming display, history, and PDF-friendly output.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 31
 
 ## Features
 
-- Keyword + client recommendation generator backed by the Arena workflow
-- Global multi-pass Unicode escape decoder applied at every render boundary (streaming, JSON, history)
-- Stage-based loading view with rotating tips and elapsed timer
-- Structured model-output renderer with FAQ, sources and visual-opportunity cards
-- Session + remote run history scoped to the Arena email
-- Print-optimized PDF export of the rendered recommendation
+- Keyword + client recommendation generation via Arena workflow
+- Defensive unicode/escape decoding of model output
+- Structured model-output rendering (sections, FAQ, sources, visual opportunities)
+- Run history (session + remote workflow history)
+- Print/PDF-friendly output view
+- Arena email gate with access-denied page
 
 ## Tech Stack
 
@@ -126,49 +126,25 @@ Arena-embedded UI that turns a target keyword and client into writer-ready SEO a
 
 ## Latest Change
 
-- **Updated at:** 2026-07-29T13:36:32.201Z
-- **Request:** Fix the Unicode rendering issue across the entire application.
+- **Updated at:** 2026-07-29T13:45:22.652Z
+- **Request:** Bug report / fix prompt:
 
-Problem:
-When a user clicks any CTA button and the application enters the loading/streaming state, the UI displays Unicode escape sequences (for example \u201c, \u201d, \u2018, \u2019, \u2026, \u2013, \u2014) instead of the actual characters. This is visible in buttons, headings, sub-headings, paragraphs, labels, notifications, and other dynamically rendered text.
+In the Article Recommendation Agent UI, unicode escape sequences are being rendered as literal text instead of their actual characters. Specifically:
 
-For example, the UI currently renders:
+The "Generating…" button shows Generating\u2026 instead of Generating…
+The "Working on "Dental implants" for..." heading shows \u201c and \u201d instead of curly quotes " and "
 
-\u201cWelcome\u201d \u2014 Loading\u2026
+This means somewhere a string containing raw \uXXXX escape sequences is being inserted into the DOM/JSX as plain text rather than being decoded first — likely because:
 
-Instead of:
+The string was JSON.stringify'd twice (double-encoding), or
+A template/label string was defined with escaped unicode inside a raw/non-parsed string (e.g., a Python raw string, or a string read from a .json/.env/config file without proper decoding), or
+The value came from an API response as an already-escaped string and is being displayed without JSON.parse or unescaping.
 
-“Welcome” — Loading…
-Requirements
-Identify where the escaped Unicode strings are entering the rendering pipeline.
-Implement a single, reusable, global solution rather than fixing individual components.
-Decode all valid \uXXXX Unicode escape sequences into their corresponding UTF-8 characters before they are rendered.
-The solution must work for:
-Streaming/SSE responses
-WebSocket responses
-API responses
-Markdown rendering
-Rich text
-All React components that render dynamic content
-Ensure decoding happens before the text is displayed so users never see the escaped values, even during streaming.
-Do not hardcode replacements for only known characters; implement a generic Unicode escape decoder that supports any valid Unicode escape sequence.
-Preserve existing formatting, Markdown, and HTML behaviour.
-Ensure there are no performance regressions or unnecessary re-renders.
-Common Examples
-Escaped	Expected
-\u201c	“
-\u201d	”
-\u2018	‘
-\u2019	’
-\u2026	…
-\u2013	–
-\u2014	—
-Acceptance Criteria
-No \uXXXX escape sequences are ever visible in the UI.
-Buttons, headings, paragraphs, labels, and streamed content display the correct Unicode characters.
-Streaming responses are decoded incrementally as they arrive.
-API responses are decoded before rendering.
-The implementation is centralised, reusable, and applied globally.
-Existing functionality, formatting, and rendering behaviour remain unchanged.
+Please find where these strings originate (search for Generating, Working on, \u2026, \u201c, \u201d in the codebase) and fix the root cause so the actual Unicode characters (…, ", ") are stored/passed instead of their escaped representations. Do NOT just do a find-and-replace patch on the rendered output — trace it back to the source (likely a prompt template, static string constant, or API response parsing step) and fix it there.
 
-Before making changes, identify the root cause of why escaped Unicode strings are reaching the UI instead of decoded text, then implement the fix at the appropriate layer rather than patching individual components.
+A few things worth checking yourself first, since this narrows it fast:
+
+If these are LLM-generated labels (the "Working on X for Y" text looks dynamically generated), check whether you're inserting the LLM's raw JSON string output directly into UI without running JSON.parse() on it.
+If it's a static string like "Generating…", check if it's defined in a source file with an unusual encoding, or if it's being passed through JSON.stringify an extra time before rendering.
+
+If you can share the component/file where "Generating…" and "Working on..." text is defined, I can point to the exact line.
