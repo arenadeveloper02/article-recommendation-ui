@@ -10,12 +10,13 @@ import { parseModelOutput } from '@/lib/modelOutput';
 /**
  * Shared defensive renderer for model output. Feed it raw (already decoded)
  * model markdown and it adapts to the actual structure of the response:
- * heading sections become cards, Q&A/FAQ numbered lists become question/answer
- * entries, reference URLs become a dedicated truncated "Sources" list, and
- * anything unparseable falls back to sanitized markdown prose. Each heading
- * section also surfaces a "Visual & Table Opportunities" callout \u2014 explicit
- * model suggestions when present, otherwise relevant inferred opportunities.
- * Content taller than the panel scrolls internally with a visible affordance.
+ * heading sections become cards, Q&A/FAQ numbered lists become semantic
+ * .faq-item blocks (question on its own line, answer below it), reference URLs
+ * become a dedicated "Sources" list, and anything unparseable falls back to
+ * sanitized markdown prose. Every card carries the `print-card` class so the
+ * @media print stylesheet (app/globals.css) can keep it intact across PDF page
+ * breaks; the SAME DOM is used for both the on-screen view and the printed PDF
+ * ("print this view"), so there is no separate PDF template to drift.
  */
 
 const PROSE_CLASSES =
@@ -45,20 +46,33 @@ function MarkdownBlock({ markdown }: { markdown: string }) {
   );
 }
 
+/**
+ * FAQ list. Each Q&A is a distinct semantic block:
+ *   <div class="faq-item">          — 16px bottom spacing + divider, break-inside: avoid
+ *     <p class="faq-question">      — its own line, 15px, weight 500
+ *     <div class="faq-answer">      — next line, normal weight, 6px top margin, 1.6 line-height
+ * The classes are styled in app/globals.css so the screen stylesheet and the
+ * @media print stylesheet can target them independently while sharing the
+ * exact same typography and spacing.
+ */
 function QAList({ items }: { items: QAItem[] }) {
   return (
-    <ol className="mt-3 space-y-3">
+    <div className="faq-list">
       {items.map((item) => (
-        <li key={item.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
-          <h4 className="text-sm font-semibold leading-snug text-ink">{item.question}</h4>
+        <div key={item.id} className="faq-item">
+          <p className="faq-question">{item.question}</p>
           {item.answer ? (
-            <MarkdownBlock markdown={item.answer} />
+            <div className="faq-answer">
+              <MarkdownBlock markdown={item.answer} />
+            </div>
           ) : (
-            <p className="mt-1 text-sm italic text-slate-400">No answer was returned for this question.</p>
+            <p className="faq-answer text-sm italic text-slate-400">
+              No answer was returned for this question.
+            </p>
           )}
-        </li>
+        </div>
       ))}
-    </ol>
+    </div>
   );
 }
 
@@ -73,7 +87,7 @@ function SourcesSection({
 }) {
   if (sources.length === 0 && !showFallback) return null;
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="print-card rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="font-display text-base font-semibold text-ink">Sources</h3>
       {sources.length > 0 ? (
         <ul className="mt-3 space-y-2">
@@ -128,20 +142,20 @@ export default function ModelOutputRenderer({
       <div className="scroll-panel max-h-[70vh] overflow-y-auto overscroll-contain pr-1">
         <div className="space-y-5 pb-6">
           {parsed.intro && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="print-card rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <MarkdownBlock markdown={parsed.intro} />
             </div>
           )}
 
           {parsed.qaItems.length > 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="print-card rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="font-display text-base font-semibold text-ink">Questions &amp; Answers</h3>
               <QAList items={parsed.qaItems} />
             </div>
           )}
 
           {parsed.sections.map((section) => (
-            <section key={section.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section key={section.id} className="print-card rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="font-display text-base font-semibold leading-snug text-ink">{section.title}</h3>
               {section.badges.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -166,7 +180,7 @@ export default function ModelOutputRenderer({
                 <p className="mt-2 text-sm italic text-slate-400">No details were returned for this section.</p>
               )}
               {section.visuals.length > 0 && (
-                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-4">
+                <div className="print-card mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-4">
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-amber-800">
                     Visual &amp; Table Opportunities
                   </h4>
@@ -193,7 +207,7 @@ export default function ModelOutputRenderer({
         </div>
       </div>
       <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-xl bg-gradient-to-t from-white/95 to-transparent"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-xl bg-gradient-to-t from-white/95 to-transparent print:hidden"
         aria-hidden="true"
       />
     </div>

@@ -1,12 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState } from 'react';
-import { jsPDF } from 'jspdf';
 import ModelOutputRenderer from '@/components/ModelOutputRenderer';
 import type { StreamEvent } from '@/lib/types';
 import {
   decodeEscapedText,
-  markdownToPlainText,
   sanitizeForFilename,
   stripSentinelTokens,
   unwrapJsonString,
@@ -81,7 +79,7 @@ export default function RecommendationClient() {
 
     setPhase('streaming');
     setContent('');
-    setStatusMessage('Connecting to the recommendation agent\u2026');
+    setStatusMessage('Connecting to the recommendation agent…');
     setErrorMessage('');
     setCopied(false);
 
@@ -217,37 +215,27 @@ export default function RecommendationClient() {
     }
   };
 
-  const handleDownloadPdf = () => {
-    const plain = markdownToPlainText(content);
-    if (!plain) return;
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 48;
-    const maxWidth = pageWidth - margin * 2;
-    let y = margin;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('Article Recommendations', margin, y);
-    y += 20;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text(`Keyword: ${keyword.trim()}  |  Client: ${client.trim()}`, margin, y);
-    y += 24;
-
-    doc.setFontSize(10.5);
-    const lines = doc.splitTextToSize(plain, maxWidth) as string[];
-    for (const line of lines) {
-      if (y > pageHeight - margin) {
-        doc.addPage();
-        y = margin;
-      }
-      doc.text(line, margin, y);
-      y += 15;
+  /**
+   * "Print this view" PDF: instead of rebuilding the document with a separate
+   * PDF template (jsPDF plain text), we print the EXACT DOM the user is looking
+   * at. The @media print stylesheet in app/globals.css isolates #print-area,
+   * fixes widths, removes UI chrome/scrollbars, keeps cards / table rows /
+   * .faq-item blocks from splitting across pages, repeats table headers, and
+   * sets a fixed A4 page with margins. We await document.fonts.ready first so
+   * the self-hosted next/font Poppins faces are fully loaded and embedded by
+   * the browser's PDF engine instead of falling back to system fonts.
+   */
+  const handleDownloadPdf = async (): Promise<void> => {
+    if (!content.trim()) return;
+    const previousTitle = document.title;
+    document.title = `recommendations-${sanitizeForFilename(keyword) || 'article'}`;
+    try {
+      await document.fonts.ready;
+    } catch {
+      // Font Loading API unavailable; print with whatever is already loaded.
     }
-    doc.save(`recommendations-${sanitizeForFilename(keyword)}.pdf`);
+    window.print();
+    document.title = previousTitle;
   };
 
   return (
@@ -300,7 +288,7 @@ export default function RecommendationClient() {
           >
             {isStreaming ? (
               <span className="inline-flex items-center justify-center gap-2">
-                <ButtonSpinner /> Generating\u2026
+                <ButtonSpinner /> Generating…
               </span>
             ) : (
               'Get Recommendations'
@@ -315,7 +303,7 @@ export default function RecommendationClient() {
             <div className="gradient-progress h-full w-full" />
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-indigo-800">{statusMessage || 'Working on your recommendations\u2026'}</p>
+            <p className="text-sm font-medium text-indigo-800">{statusMessage || 'Working on your recommendations…'}</p>
             <p className="text-xs text-indigo-500">{elapsed}s elapsed</p>
           </div>
           {content.trim().length > 0 && (
@@ -327,7 +315,7 @@ export default function RecommendationClient() {
       )}
 
       {phase === 'error' && (
-        <div className="animate-fade-in-up mt-6 rounded-2xl border border-red-200 bg-red-50 p-5">
+        <div className="animate-fade-in-up mt-6 rounded-2xl border border-red-200 bg-red-50 p-6">
           <div className="flex items-start gap-3">
             <svg
               className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
@@ -358,33 +346,27 @@ export default function RecommendationClient() {
       )}
 
       {phase === 'done' && (
-        <div className="animate-fade-in-up mt-6 rounded-2xl border border-slate-200 bg-white/95 p-6 shadow-lg shadow-indigo-100/40 backdrop-blur">
-          <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span
-                title={keyword.trim()}
-                className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700"
-              >
+        <div className="animate-fade-in-up mt-6 rounded-2xl border border-indigo-100 bg-white/90 p-6 shadow-lg shadow-indigo-100/50 backdrop-blur sm:p-8">
+          <div className="print-hide flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
                 Keyword: {keyword.trim()}
               </span>
-              <span
-                title={client.trim()}
-                className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700"
-              >
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
                 Client: {client.trim()}
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={handleCopy}
+                onClick={() => void handleCopy()}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
               >
                 {copied ? 'Copied!' : 'Copy Markdown'}
               </button>
               <button
                 type="button"
-                onClick={handleDownloadPdf}
+                onClick={() => void handleDownloadPdf()}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
               >
                 Download PDF
@@ -394,11 +376,20 @@ export default function RecommendationClient() {
                 onClick={handleGenerateMore}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-200"
               >
-                Regenerate
+                Generate Again
               </button>
             </div>
           </div>
-          <div className="mt-5">
+
+          {/* This is the ONLY region visible when printing — the PDF is a
+              faithful print of this exact on-screen markup. */}
+          <div id="print-area" className="mt-5">
+            <div className="print-header hidden print:block">
+              <h1 className="font-display text-2xl font-bold text-ink">Article Recommendations</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Keyword: {keyword.trim()} · Client: {client.trim()}
+              </p>
+            </div>
             <ModelOutputRenderer content={content} showSourcesFallback />
           </div>
         </div>

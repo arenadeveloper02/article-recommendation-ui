@@ -69,6 +69,197 @@ body {
   background-color: rgba(26, 115, 232, 0.55);
 }
 
+/* ------------------------------------------------------------------ */
+/* FAQ items — semantic classes shared by the SCREEN and PRINT styles. */
+/* Each Q&A is a distinct block: question on its own line (weight 500, */
+/* 15px), answer on the next line (normal weight, 6px top margin,      */
+/* line-height 1.6, readable measure), 16px separation + divider, and  */
+/* break-inside: avoid so a question never splits from its answer on a */
+/* PDF page break.                                                     */
+/* ------------------------------------------------------------------ */
+.faq-list {
+  margin-top: 12px;
+}
+
+.faq-item {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #e2e3e5;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.faq-item:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.faq-question {
+  display: block;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #2c2d33;
+}
+
+.faq-answer {
+  display: block;
+  margin-top: 6px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #41444d;
+  max-width: 68ch; /* avoid full-bleed text width for readability */
+}
+
+.faq-answer > div {
+  margin-top: 0; /* neutralize the prose block's own top margin */
+}
+
+.faq-answer p,
+.faq-answer li {
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ */
+/* PRINT / PDF stylesheet — "print this view".                         */
+/* The Download PDF button awaits document.fonts.ready (the Poppins    */
+/* faces are self-hosted @font-face files bundled by next/font, so the */
+/* SAME fonts used on screen are embedded in the PDF) and then calls   */
+/* window.print(). These rules isolate #print-area, fix widths (no     */
+/* viewport-relative sizes), remove UI-only chrome, and control        */
+/* pagination so cards, table rows and FAQ items never split.          */
+/* ------------------------------------------------------------------ */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    background-image: none !important;
+    color: #2c2d33;
+  }
+
+  /* Reveal ONLY the rendered result region; everything else (form,
+     buttons, progress UI, app chrome) stays out of the PDF. */
+  body * {
+    visibility: hidden;
+  }
+
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+
+  #print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Print-only report header (hidden on screen via Tailwind `hidden`). */
+  .print-header {
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #1a73e8;
+  }
+
+  /* The result panel loses its internal scroll: all content flows into
+     the paginated document instead of being clipped at 70vh. */
+  #print-area .scroll-panel {
+    max-height: none !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+  }
+
+  /* Cards stay intact across page breaks and drop screen-only chrome. */
+  #print-area .print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    border: 1px solid #e2e3e5 !important;
+  }
+
+  /* Tables: fixed layout so columns never overflow the fixed A4 width;
+     headers repeat when a table spans multiple pages; rows never split. */
+  #print-area table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  #print-area thead {
+    display: table-header-group;
+  }
+
+  #print-area tfoot {
+    display: table-footer-group;
+  }
+
+  #print-area tr,
+  #print-area li {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #print-area th,
+  #print-area td {
+    word-break: break-word;
+  }
+
+  /* Simplify layouts the print engine paginates poorly: wrapping flex
+     rows (badge chips) become plain blocks with inline-block children. */
+  #print-area .flex-wrap {
+    display: block;
+  }
+
+  #print-area span.inline-flex {
+    display: inline-block;
+  }
+
+  /* Links print with full, wrapped URLs instead of screen truncation. */
+  #print-area a {
+    color: #155cba;
+    word-break: break-all;
+  }
+
+  #print-area .truncate {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+  }
+
+  /* UI-only elements never reach the PDF. */
+  #print-area button,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* FAQ blocks keep identical screen typography and never split a
+     question from its answer across a page break. */
+  .faq-item {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .animate-fade-in-up,
+  .gradient-progress {
+    animation: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in-up,
   .gradient-progress {
