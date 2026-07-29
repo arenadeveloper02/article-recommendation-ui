@@ -1,9 +1,3 @@
-// Prisma schema — Neon Postgres on Vercel. The app primarily reads/writes
-// through external Arena workflows; the RecommendationRun model below exists
-// so the schema defines at least one model and provides an additive place to
-// persist generation history if/when server-side persistence is wired up.
-// Never edit or remove existing fields — add new models/columns only.
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,11 +7,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Recommendation runs recorded per Arena email. Additive model only — the
+// deployed baseline defined no models, so this is a pure addition.
 model RecommendationRun {
   id        String   @id @default(cuid())
-  email     String
+  emailId   String
   keyword   String
   client    String
-  output    String
+  output    String?
   createdAt DateTime @default(now())
+
+  @@index([emailId])
 }

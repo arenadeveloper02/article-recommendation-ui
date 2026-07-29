@@ -58,7 +58,7 @@ export async function GET(): Promise<NextResponse> {
       },
       body: JSON.stringify({
         email,
-        type: 'history',
+        type: 'article_recommendation',
         stream: false,
         selectedOutputs: ['buildhistory.result'],
       }),
