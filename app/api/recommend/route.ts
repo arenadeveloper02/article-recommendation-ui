@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { StreamEvent } from '@/lib/types';
 import { stripSentinelTokens } from '@/lib/modelOutput';
+import { getArenaEmailId } from '@/lib/arena-email';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -8,6 +9,13 @@ export const dynamic = 'force-dynamic';
 const WORKFLOW_ENDPOINT =
   'https://agent.thearena.ai/api/workflows/09e8e4e6-4b9c-4126-95f2-cbfcfd025f63/execute';
 const WORKFLOW_API_KEY = 'sk-sim-Vk9yj3QfVSZxJ8lulZTYK549u5ThZo9u';
+
+/** Workflow outputs requested from the agent, per the updated API contract. */
+const SELECTED_OUTPUTS = [
+  'briefgeneration.content',
+  'self-qaalignment.content',
+  'patternanalysis.content',
+];
 
 const TEXT_KEYS = ['chunk', 'content', 'text', 'output', 'answer', 'result', 'message'];
 const SSE_FIELD_PATTERN = /^(?:data|event|id|retry):|^:/;
@@ -166,6 +174,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'A client or brand name is required.' }, { status: 400 });
   }
 
+  // Email from the Arena session (set by middleware from ?emailId= into the
+  // httpOnly cookie). Forwarded to the workflow per the updated API contract.
+  const email = (await getArenaEmailId()) ?? '';
+
   try {
     const upstream = await fetch(WORKFLOW_ENDPOINT, {
       method: 'POST',
@@ -173,7 +185,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         'X-API-Key': WORKFLOW_API_KEY,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ keyword, client, stream: true }),
+      body: JSON.stringify({
+        keyword,
+        client,
+        email,
+        stream: true,
+        selectedOutputs: SELECTED_OUTPUTS,
+      }),
       cache: 'no-store',
     });
 
@@ -325,23 +343,15 @@ export async function POST(request: NextRequest): Promise<Response> {
           buffer += decoder.decode();
           if (buffer.trim()) {
             processEventBlock(buffer);
-            buffer = '';
           }
           flushCarry();
           send({ type: 'done' });
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'The recommendation stream failed.';
+          const message = err instanceof Error ? err.message : 'The stream was interrupted.';
           send({ type: 'error', text: message });
         } finally {
-          try {
-            controller.close();
-          } catch {
-            // Controller may already be closed.
-          }
+          controller.close();
         }
-      },
-      cancel() {
-        void reader.cancel();
       },
     });
 

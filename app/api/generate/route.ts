@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { stripSentinelTokens } from '@/lib/modelOutput';
+import { getArenaEmailId } from '@/lib/arena-email';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -7,6 +8,13 @@ export const dynamic = 'force-dynamic';
 const WORKFLOW_ENDPOINT =
   'https://agent.thearena.ai/api/workflows/09e8e4e6-4b9c-4126-95f2-cbfcfd025f63/execute';
 const WORKFLOW_API_KEY = 'sk-sim-Vk9yj3QfVSZxJ8lulZTYK549u5ThZo9u';
+
+/** Workflow outputs requested from the agent, per the updated API contract. */
+const SELECTED_OUTPUTS = [
+  'briefgeneration.content',
+  'self-qaalignment.content',
+  'patternanalysis.content',
+];
 
 /**
  * Multi-pass decoder for literal escape sequences. Handles BOTH single-escaped
@@ -107,6 +115,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'A target keyword is required.' }, { status: 400 });
   }
 
+  // Email from the Arena session (set by middleware from ?emailId= into the
+  // httpOnly cookie). Forwarded to the workflow per the updated API contract.
+  const email = (await getArenaEmailId()) ?? '';
+
   try {
     const upstream = await fetch(WORKFLOW_ENDPOINT, {
       method: 'POST',
@@ -114,7 +126,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         'X-API-Key': WORKFLOW_API_KEY,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ keyword, client, stream: false }),
+      body: JSON.stringify({
+        keyword,
+        client,
+        email,
+        stream: false,
+        selectedOutputs: SELECTED_OUTPUTS,
+      }),
       cache: 'no-store',
     });
 

@@ -1,21 +1,21 @@
 # Repository Summary: article-recommendation-ui
 
-> Auto-maintained by Sim Development. Last updated: 2026-07-29T11:32:12.946Z.
+> Auto-maintained by Sim Development. Last updated: 2026-07-29T12:03:12.733Z.
 
 ## Overview
 
-Article Recommendation Agent UI that turns a target keyword and client into writer-ready article recommendations, with structured FAQ rendering and print-to-PDF support.
+Arena-embedded UI that turns a target keyword and client into writer-ready article recommendations via the Arena workflow API, with streaming output, markdown rendering, and print-to-PDF support.
 
 **Repository:** `article-recommendation-ui`  
 **File count:** 29
 
 ## Features
 
-- Streamed article recommendations from the Arena workflow API
-- Structured model-output rendering with sections, badges, sources, and FAQ blocks
-- FAQ entries rendered as distinct question/answer blocks with consistent spacing
-- Print-this-view PDF export with pagination-safe cards and FAQ items
-- Arena email gate with access-denied page and iframe-safe headers
+- Keyword + client recommendation form with validation
+- Streaming SSE output from the Arena workflow API with live status
+- Defensive markdown/FAQ/sources rendering of model output
+- Copy to clipboard and print-this-view PDF export
+- Arena emailId gate with access-denied page and cookie persistence
 
 ## Tech Stack
 
@@ -121,18 +121,11 @@ Article Recommendation Agent UI that turns a target keyword and client into writ
 
 ## Latest Change
 
-- **Updated at:** 2026-07-29T11:32:12.946Z
-- **Request:** Need to fix the below item:
+- **Updated at:** 2026-07-29T12:03:12.733Z
+- **Request:** CHnage the API 
 
-In the FAQ section, each item currently renders as a single paragraph with the bold 'Q:' label and the answer text running together inline. Please restructure each FAQ entry so the question and answer are visually distinct blocks:
-
-The question (bold, starting with 'Q:') should sit on its own line.
-The answer (starting with 'A:') should start on a new line below the question, not inline with it.
-Add spacing between the question and its answer (e.g., 8px margin).
-Optionally indent the answer slightly (e.g., 16px left margin) so it reads as subordinate to the question above it.
-Keep consistent spacing (e.g., 24px margin-bottom) between each full FAQ item.
-
-Apply this to all FAQ items in the section, not just the first one.
-
-
-Make sure that it wont touch any other existing behavior
+curl -X POST \
+  -H "X-API-Key: $SIM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"keyword":"example","client":"example","email":"email from the session","stream":true,"selectedOutputs":["briefgeneration.content","self-qaalignment.content","patternanalysis.content"]}' \
+  https://agent.thearena.ai/api/workflows/09e8e4e6-4b9c-4126-95f2-cbfcfd025f63/execute
